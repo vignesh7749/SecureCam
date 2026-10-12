@@ -278,7 +278,7 @@ export const LiveCameraPage: React.FC = () => {
     if (!WS_BASE_URL) {
       setConnectionStatus('error');
       setErrorMessage(
-        'Live Feed requires a configured backend. VITE_BACKEND_URL is missing in this production deployment. Please set VITE_BACKEND_URL in your hosting provider settings (e.g. Vercel) and redeploy.'
+        'Live Camera streaming and real-time AI processing require the local FastAPI backend. In Demo Mode, live webcam inference is unavailable. To run live camera AI inference, start the backend locally: python -m uvicorn app.main:app --port 8000 (see README).'
       );
       return;
     }
@@ -601,6 +601,19 @@ export const LiveCameraPage: React.FC = () => {
             <li><strong>Mobile Phones (Chrome / Safari):</strong> Tap <em>Start Camera</em> and allow permission when prompted. Use the <em>Flip Camera</em> button to switch between Front and Rear lens.</li>
             <li><strong>Remote Wi-Fi Access:</strong> In modern browsers, camera access on non-localhost IPs requires HTTPS or localhost. If opening from a mobile phone on LAN (e.g. <code>http://192.168.x.x:5173</code>), configure HTTPS or use port forwarding/tunneling.</li>
           </ul>
+        </div>
+      )}
+
+      {/* Demo Mode Notice: Clear and honest explanation */}
+      {(!BACKEND_URL || !backendHealth) && (
+        <div className="bg-amber-500/10 border border-amber-500/30 rounded p-3 text-xs text-amber-900 dark:text-amber-200 flex items-start gap-2.5">
+          <Info className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+          <div className="space-y-1">
+            <span className="font-semibold">Local Backend Required for Live Camera AI</span>
+            <p>
+              Live Camera streaming and real-time AI processing require the local FastAPI backend. In Demo Mode, live webcam inference is unavailable. To run live camera AI inference, start the backend locally: <code className="bg-amber-500/20 px-1 py-0.5 rounded font-mono text-[11px]">python -m uvicorn app.main:app --port 8000</code> (see README).
+            </p>
+          </div>
         </div>
       )}
 

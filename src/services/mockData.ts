@@ -6,10 +6,63 @@ import { TimeSeriesMetric, ClassDistribution, ZoneActivityMetric, SurveillanceSu
 import { SystemModelConfig, SystemSettings } from '../types/system';
 
 /**
- * @deprecated Obsolete Stage 1 mock datasets. Built-in sample videos are now dynamically
- * discovered strictly from backend/samples/ via the FastAPI /api/v1/video/samples endpoint.
+ * Static sample videos available in Demo Mode on static hosting (e.g. Vercel).
+ * Ground-truth metadata matched to approved sample assets in public/samples/.
  */
-export const SAMPLE_VIDEOS: SampleVideo[] = [];
+export const STATIC_SAMPLE_VIDEOS: SampleVideo[] = [
+  {
+    id: 'sample_testing_1',
+    title: 'Traffic & Vehicle Activity (Testing 1)',
+    displayName: 'Traffic & Vehicle Activity (Testing 1)',
+    filename: 'Testing_1.mp4',
+    category: 'Vehicle & Pedestrian Surveillance',
+    duration: '0:11',
+    durationSeconds: 11.18,
+    resolution: '1920x1080',
+    description: 'Roadway surveillance benchmark demonstrating multi-vehicle tracking, trajectory analysis, and ByteTrack persistent IDs.',
+    difficulty: 'Standard',
+    thumbnailUrl: '',
+    sourceUrl: '/samples/Testing_1.mp4',
+    streamUrl: '/samples/Testing_1.mp4',
+    width: 1920,
+    height: 1080,
+    fps: 29.97,
+    fileSize: 12253807,
+    format: 'video/mp4',
+    codec: 'h264',
+    frameCount: 335,
+    defaultObjectsCount: 28,
+    hasUnknowns: false,
+    hasEmergencyZone: true,
+  },
+  {
+    id: 'sample_college_testing_file',
+    title: 'Campus Corridor (College Testing File)',
+    displayName: 'Campus Corridor (College Testing File)',
+    filename: 'College_Testing_File.mp4',
+    category: 'Campus Perimeter Security',
+    duration: '0:05',
+    durationSeconds: 5.3,
+    resolution: '1280x720',
+    description: 'Campus corridor benchmark evaluating pedestrian movement, loitering detection, and emergency zone boundaries.',
+    difficulty: 'Standard',
+    thumbnailUrl: '',
+    sourceUrl: '/samples/College_Testing_File.mp4',
+    streamUrl: '/samples/College_Testing_File.mp4',
+    width: 1280,
+    height: 720,
+    fps: 30.0,
+    fileSize: 4949050,
+    format: 'video/mp4',
+    codec: 'h264',
+    frameCount: 159,
+    defaultObjectsCount: 32,
+    hasUnknowns: false,
+    hasEmergencyZone: true,
+  },
+];
+
+export const SAMPLE_VIDEOS: SampleVideo[] = STATIC_SAMPLE_VIDEOS;
 
 export const INITIAL_ZONES: SecurityZone[] = [
   {

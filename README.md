@@ -1,79 +1,175 @@
-# SECURECAM // Intelligent AI Surveillance & Threat Intelligence Platform
+# SECURECAM // AI Surveillance Intelligence Platform
 
-**SECURECAM** is an intelligent video surveillance platform engineered for modern Security Operations Centers (SOC). It detects and tracks objects in surveillance streams, identifies unfamiliar/novel objects using anomaly embeddings, monitors configurable emergency zones, detects prolonged dwell/loitering violations, raises critical alarms, records security events, and generates comprehensive surveillance analytics and intelligence briefs.
+[![Vercel Deployment](https://img.shields.io/badge/Vercel-Live%20Demo-emerald?style=for-the-badge&logo=vercel)](https://secure-cam-kappa.vercel.app)
+[![GitHub Repository](https://img.shields.io/badge/GitHub-Repository-blue?style=for-the-badge&logo=github)](https://github.com/vignesh7749/SecureCam)
+[![Python FastAPI](https://img.shields.io/badge/Backend-FastAPI%200.115+-009688?style=for-the-badge&logo=fastapi)](backend/)
+[![React TypeScript](https://img.shields.io/badge/Frontend-React%2018%20%2B%20Vite-61DAFB?style=for-the-badge&logo=react)](src/)
+[![YOLOv8 ByteTrack](https://img.shields.io/badge/CV-YOLOv8%20%2B%20ByteTrack-orange?style=for-the-badge)](backend/app/)
 
----
-
-## 🚀 Stage 1: Premium Frontend & Architecture Foundation
-
-This stage implements the professional commercial-grade user interface and scalable frontend architecture. 
-
-### Key Highlights
-- **Command Center Dashboard**: Live telemetry, active video source HUD, real-time metrics (Total Objects, Known Objects, Unknown Novelties, Active Events, Zone Violations), and recent events audit log.
-- **Surveillance Viewer**: Central tactical viewer with HUD metrics (FPS, FRAME, TIMESTAMP, MODEL, SOURCE), technical bounding boxes (`PERSON #07 96.8%`, `CAR #03 94.1%`, `UNKNOWN #12 74.2%`), movement trails, and reticles.
-- **Interactive Emergency Zone Drawing**: First-class security zone engine allowing operators to click `+ DRAW ZONE` and draw **rectangular** or **polygon** zones directly on the video canvas, set loitering dwell thresholds (e.g., 10 seconds), configure monitored classes, and trigger automated `🚨 ZONE VIOLATION` alerts.
-- **Dedicated Unknown Objects Intelligence**: Anomaly panel displaying Novelty Score (e.g. 91%), Persistence (98%), Frames Observed (759), investigation status lifecycle (`INVESTIGATE`, `FLAGGED`, `RESOLVED`, `DISMISSED`), and feature signature embeddings.
-- **Video Analysis Workspace**: Drag-and-drop video ingest with container probe metadata (resolution, frame rate, duration, file size, codec), analysis playback controls (Start, Pause, Stop, Replay), and benchmark sample video library across 7 surveillance scenarios.
-- **Tactical Live Monitor**: Multi-camera grid (1x1, 2x2, 3x3) prepared for future RTSP / IP Camera / CCTV streams.
-- **Surveillance Analytics**: Recharts visualizations for target temporal density, class distribution, perimeter breach frequency, and inference FPS/latency stability.
-- **Reports & Export Generator**: Tactical intelligence briefs with export simulation for PDF Dossiers, JSON Telemetry, and CSV Audit Logs.
-- **System Settings Panel**: Hyperparameter tuning for detection confidence, novelty thresholds, tracking association, and hardware acceleration options.
+**SECURECAM** is an intelligent video surveillance platform engineered for modern Security Operations Centers (SOC). It provides real-time and post-capture computer vision analytics: multi-object detection via **Ultralytics YOLOv8**, persistent multi-object tracking via **ByteTrack**, novelty and unfamiliar entity discovery via **DINOv2** visual embeddings, user-defined **Emergency Zones** with ray-casting point-in-polygon verification, and automated dwell-time intrusion alarms.
 
 ---
 
-## 📁 Scalable Directory Architecture
+## 🌐 Live Web Demo
+
+**Live Frontend URL:** [https://secure-cam-kappa.vercel.app](https://secure-cam-kappa.vercel.app)
+
+The frontend is deployed as a static web application on Vercel. Because the Python/PyTorch computer vision backend is not hosted on cloud infrastructure at this stage, the web application runs in an honest, transparent **Demo Mode**.
+
+### 🌟 What Works in Demo Mode (Static Vercel Deployment)
+- **Authentic Precomputed Benchmark Replay:** Replays real, verified YOLOv8 + ByteTrack detections frame-by-frame on approved benchmark videos (`Testing_1.mp4`, `College_Testing_File.mp4`).
+- **Zero Fake Detections:** The application never generates random synthetic boxes or claims in-browser inference. It displays raw video playback or authentic benchmark results.
+- **HTML5 Surveillance Video Player:** Play, pause, step frame, seek, scrub timeline, and adjust playback speed (0.5x, 1x, 2x).
+- **Interactive Emergency Zones Canvas:** Draw rectangular or polygonal security zones directly onto the video canvas and test dwell thresholds in-memory.
+- **Trajectory Trails & Real-Time HUD:** Dynamic tracking IDs, velocity vectors, class tags, confidence scores, and bounding boxes.
+- **Auditable Security Alerts & Events:** Real-time alarm siren chime, event popovers, and severity categorization.
+- **Surveillance Reports & Metrics:** Target density charts, class breakdown, dwell analytics, and report export simulation.
+- **Mobile-First Responsive Interface:** Full touch support, bottom navigation on mobile, safe-area insets, and dark/light theme switching.
+- **First-Time Tutorial Walkthrough:** Built-in modal guide walking users through key SOC features.
+
+### ⚙️ What Requires the Local FastAPI Backend
+- **Live Camera Streaming:** Ingesting browser webcam or external USB camera frames via binary WebSockets with real-time inference.
+- **Custom Video File Ingest:** Uploading new MP4/AVI/MKV files and running on-demand frame extraction.
+- **Live YOLOv8 Inference:** Running live object detection models locally on CPU or CUDA GPU.
+- **Live ByteTrack Association:** Calculating Kalman filter tracking and bounding box association in real time.
+- **DINOv2 Novelty Analysis:** Extracting deep visual embeddings to detect unfamiliar or novel entities against a reference gallery.
+- **Persistent Zone Storage:** Saving custom security zones permanently to `backend/app/zones/zones_store.json`.
+
+---
+
+## 🏗️ Architecture & Technology Stack
 
 ```
-src/
-├── types/
-│   ├── detection.ts        # ObjectDetection, TrackedObject, UnknownObject interfaces
-│   ├── zone.ts             # SecurityZone, ZonePoint, ZoneViolation, ZoneStatus
-│   ├── event.ts            # SecurityEvent, EventSeverity, EventType
-│   ├── video.ts            # VideoSource, SampleVideo, AnalysisSession, VideoMetadata
-│   ├── analytics.ts        # SurveillanceMetrics, TimeSeriesMetric, ClassDistribution
-│   └── system.ts           # SystemSettings, SystemModelConfig
-├── services/
-│   ├── api.ts              # ISurveillanceApi contract + MockSurveillanceApi demo provider
-│   ├── mockData.ts         # Realistic SOC datasets, sample video library, test scenarios
-│   └── zoneService.ts      # Ray-casting point-in-polygon & loitering threshold algorithms
-├── hooks/
-│   └── useClock.ts         # High-precision UTC & Local SOC clock
-├── context/
-│   └── SurveillanceContext.tsx  # Global surveillance state, playback loop, zone engine
-├── components/
-│   ├── common/             # Badge, Button, StatCard, TacticalModal
-│   ├── layout/             # Header, Navigation, MainLayout
-│   ├── surveillance/       # SurveillanceViewer, BoundingBoxOverlay, ZoneOverlay, ZoneEditorCanvas, VideoControls
-│   ├── zones/              # ZoneList, ZoneConfigModal, ZoneViolationBanner
-│   ├── objects/            # ObjectTable, UnknownObjectCard, ObjectInspectorModal
-│   ├── events/             # EventTimeline
-│   ├── videoAnalysis/      # VideoUploader, SampleVideoLibrary, VideoMetadataCard
-│   ├── liveMonitor/        # MultiCameraMatrix
-│   ├── analytics/          # SurveillanceCharts (Recharts)
-│   ├── reports/            # ReportGenerator
-│   └── system/             # SystemSettingsPanel
-├── pages/
-│   ├── CommandCenterPage.tsx
-│   ├── VideoAnalysisPage.tsx
-│   ├── LiveMonitorPage.tsx
-│   ├── ObjectIntelligencePage.tsx
-│   ├── EventsPage.tsx
-│   ├── AnalyticsPage.tsx
-│   ├── ReportsPage.tsx
-│   └── SystemPage.tsx
-├── App.tsx
-└── main.tsx
+┌─────────────────────────────────────────────────────────────────┐
+│                     SECURECAM ARCHITECTURE                      │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│   Frontend (React 18 + TypeScript + Vite + Tailwind CSS)        │
+│   ├── Video Viewport & Tactical HUD Overlay                     │
+│   ├── Zone Canvas (Ray-casting Point-in-Polygon Engine)        │
+│   ├── Surveillance Context & Frame Sync Dispatcher              │
+│   ├── WebSocket / REST API Client (ISurveillanceApi)            │
+│   └── Mobile-Optimized Responsive Views & Audio Alarms          │
+│                                │                                │
+│                     HTTP / WebSocket (JSON & Binary)            │
+│                                ▼                                │
+│   Backend (Python 3.10+ / FastAPI / Uvicorn)                   │
+│   ├── Video Processing Engine (OpenCV / PyAV)                   │
+│   ├── Object Detection: Ultralytics YOLOv8                      │
+│   ├── Object Tracking: ByteTrack (Persistent Kalman IDs)        │
+│   ├── Novelty & Anomaly: DINOv2 Deep Visual Embeddings          │
+│   ├── Emergency Zones Service & Loitering Dwell Evaluator       │
+│   └── WebSocket Real-Time Ingest Pipeline (/ws/live-feed)       │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 🔌 Stage 2 Integration Plan (FastAPI + YOLO + PyTorch)
+## 🚀 Running SecureCam Locally
 
-The frontend is strictly decoupled via `ISurveillanceApi` in `src/services/api.ts`:
-1. Implement `RealSurveillanceApi` extending `ISurveillanceApi`.
-2. Connect to FastAPI backend endpoints:
-   - `POST /api/v1/detect` (Ultralytics YOLO inference)
-   - `WS /api/v1/stream` (Live WebSocket stream with ByteTrack bounding boxes & dwell times)
-   - `POST /api/v1/zones` (Store and query polygon zone coordinates)
-   - `POST /api/v1/unknowns` (Extract feature vectors for novelty scoring)
-3. Zero frontend component rewrites required.
+To experience the full capabilities of SecureCam—including live webcam streaming, custom video uploads, and real-time YOLOv8 + ByteTrack inference—run both the backend and frontend locally.
+
+### Prerequisites
+- **Node.js** 18+ and **npm**
+- **Python** 3.10+ and **pip**
+- (Optional) NVIDIA GPU with CUDA support for accelerated PyTorch inference
+
+---
+
+### Step 1: Start the FastAPI Backend
+
+1. Navigate to the `backend/` directory:
+   ```bash
+   cd backend
+   ```
+
+2. Create and activate a Python virtual environment:
+   ```bash
+   # Windows (PowerShell):
+   python -m venv venv
+   .\venv\Scripts\Activate.ps1
+
+   # Linux / macOS:
+   python3 -m venv venv
+   source venv/bin/activate
+   ```
+
+3. Install backend dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+4. Run the automated backend test suite to verify the installation:
+   ```bash
+   python -m pytest tests/ -v
+   ```
+
+5. Start the backend server:
+   ```bash
+   python run_backend.py
+   # Or using uvicorn directly:
+   python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+   ```
+   The backend API will be available at `http://localhost:8000`. Swagger documentation is accessible at `http://localhost:8000/docs`.
+
+---
+
+### Step 2: Start the React Frontend
+
+1. In a separate terminal, navigate to the project root:
+   ```bash
+   cd ..
+   ```
+
+2. Install frontend dependencies:
+   ```bash
+   npm install
+   ```
+
+3. Create a local environment configuration file:
+   ```bash
+   # Create .env.local in the root directory:
+   echo VITE_BACKEND_URL=http://localhost:8000 > .env.local
+   ```
+
+4. Run the production build check:
+   ```bash
+   npm run build
+   ```
+
+5. Start the Vite development server:
+   ```bash
+   npm run dev
+   ```
+
+6. Open your browser and navigate to:
+   ```
+   http://localhost:5173
+   ```
+   The header status indicator will turn green: **Backend: Connected**. All live inference, webcam streaming, and custom video upload capabilities are now active.
+
+---
+
+## 📹 Sample Videos & Benchmark Data
+
+SecureCam includes authentic surveillance benchmark recordings in `public/samples/`:
+
+| File | Size | Scenario | Detections & Tracks |
+| :--- | :--- | :--- | :--- |
+| `Testing_1.mp4` | 11.69 MB | Multi-target traffic & pedestrian corridor | 1,191 detections, 28 unique tracks |
+| `College_Testing_File.mp4` | 4.72 MB | Campus security perimeter & walkway | 32 detections, 32 unique tracks |
+
+Precomputed ground-truth session files (`sample_testing_1_session.json` and `sample_college_testing_file_session.json`) are bundled in `public/samples/` to enable immediate zero-latency replay in Demo Mode.
+
+---
+
+## 🛡️ Security & Privacy Notice
+- SecureCam processes video frames locally on the operator's machine or on dedicated edge servers.
+- No video feeds, biometric signatures, or surveillance data are transmitted to external third-party services.
+- Web browser camera streaming utilizes standard HTML5 `getUserMedia` APIs restricted to secure contexts (`https://` or `localhost`).
+
+---
+
+## 📄 License
+This project is developed for educational, academic, and research purposes.

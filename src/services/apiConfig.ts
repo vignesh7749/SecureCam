@@ -53,12 +53,12 @@ export function resolveBackendUrl(): string {
     return 'http://localhost:8000';
   }
 
-  // Production deployment with missing VITE_BACKEND_URL
+  // Production deployment with missing VITE_BACKEND_URL: Fall back to Demo Mode
   if (typeof console !== 'undefined') {
-    console.error(
-      '[SecureCam] MISSING VITE_BACKEND_URL: The application is running in production without a configured backend URL. ' +
-      'Please set VITE_BACKEND_URL in your hosting provider\'s environment variables (e.g. Vercel Project Settings) ' +
-      'to your deployed backend HTTPS URL (e.g. https://securecam-api.railway.app) and redeploy.'
+    console.info(
+      '[SecureCam] Running in Demo Mode: VITE_BACKEND_URL is not set. ' +
+      'Precomputed benchmark sessions and static sample videos are active. ' +
+      'To enable live AI inference and streaming, set VITE_BACKEND_URL to your backend API URL.'
     );
   }
   return '';
@@ -66,14 +66,17 @@ export function resolveBackendUrl(): string {
 
 export const BACKEND_URL = resolveBackendUrl();
 export const WS_BASE_URL = BACKEND_URL ? getWebSocketUrl(BACKEND_URL) : '';
+export const isBackendConfigured = Boolean(BACKEND_URL);
 
 /**
- * Asserts that the backend URL is configured before executing network operations.
+ * Asserts that the backend URL is configured before executing backend-dependent operations.
  */
 export function assertBackendConfigured(): void {
-  if (!BACKEND_URL && isProduction) {
+  if (!BACKEND_URL) {
     throw new Error(
-      'SecureCam Backend URL is not configured. Please set the VITE_BACKEND_URL environment variable in your hosting provider (e.g. Vercel) to point to your live backend.'
+      'This feature requires the running SecureCam FastAPI backend. ' +
+      'In Demo Mode, precomputed benchmark sample videos and offline controls are available. ' +
+      'To enable live inference, run the backend server locally or configure VITE_BACKEND_URL.'
     );
   }
 }

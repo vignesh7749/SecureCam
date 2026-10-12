@@ -11,7 +11,8 @@ import {
   INITIAL_EVENTS, 
   INITIAL_ZONE_VIOLATIONS, 
   DEFAULT_SYSTEM_SETTINGS, 
-  DEFAULT_MODEL_CONFIG 
+  DEFAULT_MODEL_CONFIG,
+  STATIC_SAMPLE_VIDEOS
 } from '../services/mockData';
 import { evaluateZones } from '../services/zoneService';
 import { realSurveillanceApi, RealBackendHealth, BACKEND_URL } from '../services/realApi';
@@ -70,6 +71,7 @@ interface SurveillanceContextType {
   activeTracksCount: number;
   totalUniqueTracksCount: number;
   analysisStatus: 'IDLE' | 'ANALYZING' | 'PAUSED' | 'COMPLETED';
+  isPrecomputedDemoReplay: boolean;
   startAnalysis: () => void;
   pauseAnalysis: () => void;
   stopAnalysis: () => void;
@@ -138,7 +140,7 @@ interface SurveillanceContextType {
 }
 
 export interface CachedVideoSession {
-  analysisId?: string;
+  analysisId?: string | null;
   status: 'IDLE' | 'ANALYZING' | 'PAUSED' | 'COMPLETED';
   progress: number;
   trackedObjects: TrackedObject[];
@@ -158,7 +160,8 @@ export const SurveillanceProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const [activeTab, setActiveTab] = useState<NavTabId>('command-center');
 
   // Provider Mode (DEMO vs LIVE AI)
-  const [apiMode, setApiModeState] = useState<ApiMode>('LIVE_AI');
+  const [apiMode, setApiModeState] = useState<ApiMode>(BACKEND_URL ? 'LIVE_AI' : 'DEMO');
+  const [isPrecomputedDemoReplay, setIsPrecomputedDemoReplay] = useState<boolean>(false);
   const [backendHealth, setBackendHealth] = useState<RealBackendHealth | null>(null);
   const [backendError, setBackendError] = useState<string | null>(null);
   const [realDetections, setRealDetections] = useState<Detection[]>([]);
@@ -645,78 +648,6 @@ export const SurveillanceProvider: React.FC<{ children: React.ReactNode }> = ({ 
   }, [playAlarmSound]);
 
 
-  // Mode switcher
-  const setApiMode = useCallback((mode: ApiMode) => {
-    setApiModeState(mode);
-    setGlobalApiMode(mode);
-    setBackendError(null);
-    if (mode === 'DEMO') {
-      setRealDetections([]);
-      setTrackedObjects(INITIAL_TRACKED_OBJECTS);
-      setUnknownObjects(INITIAL_UNKNOWN_OBJECTS);
-      setActiveViolations(INITIAL_ZONE_VIOLATIONS);
-      setModelConfig(prev => ({ ...prev, tracker: 'ByteTrack' }));
-    } else {
-      // LIVE AI MODE: Zero mock data leakage
-      setRealDetections([]);
-      setTrackedObjects([]);
-      setUnknownObjects([]);
-      setActiveViolations([]);
-      setModelConfig(prev => ({ ...prev, tracker: 'ByteTrack' }));
-      if (activeSource?.id) {
-        startVideoAnalysisPipeline(activeSource.id);
-      }
-    }
-  }, [activeSource, startVideoAnalysisPipeline]);
-
-  // Check backend health periodically
-  useEffect(() => {
-    let isMounted = true;
-    const checkHealth = async () => {
-      try {
-        const health = await realSurveillanceApi.getBackendHealth();
-        if (isMounted) {
-          setBackendHealth(health);
-          setBackendError(null);
-          if (health.model.loaded) {
-            setModelConfig({
-              name: health.model.model_name,
-              version: health.model.model_version,
-              weights: `${health.model.model_name} (Ultralytics)`,
-              inputResolution: "640x640 (RGB)",
-              backend: health.device.cuda_available ? "PyTorch / CUDA" : "PyTorch / CPU",
-              tracker: "ByteTrack",
-              status: "ACTIVE",
-            });
-          }
-        }
-      } catch (err: any) {
-        if (isMounted) {
-          setBackendHealth(null);
-          if (apiMode === 'LIVE_AI') {
-            setBackendError('Backend service unreachable. Run "python -m uvicorn app.main:app --port 8000" in backend/ or switch to DEMO MODE.');
-          }
-        }
-      }
-    };
-
-    checkHealth();
-    const interval = setInterval(checkHealth, 10000);
-    return () => {
-      isMounted = false;
-      clearInterval(interval);
-    };
-  }, [apiMode]);
-
-  // Clean up any existing WebSocket on unmount
-  useEffect(() => {
-    return () => {
-      if (activeWsRef.current) {
-        activeWsRef.current.close();
-      }
-    };
-  }, []);
-
   // Multi-Video Session Caching & Isolation
   const saveCurrentSession = useCallback(() => {
     const currentId = currentVideoIdRef.current;
@@ -756,11 +687,12 @@ export const SurveillanceProvider: React.FC<{ children: React.ReactNode }> = ({ 
       setTotalUniqueTracksCount(cached.totalUniqueTracksCount);
       setAnalysisProgress(cached.progress);
       setAnalysisStatus(cached.status);
+      setIsPrecomputedDemoReplay(cached.frameTracks.size > 0);
       return;
     }
 
-    // Check if backend already processed this video session
-    if (apiModeRef.current === 'LIVE_AI') {
+    // Check if live backend already processed this video session
+    if (apiModeRef.current === 'LIVE_AI' && BACKEND_URL) {
       try {
         const latest = await realSurveillanceApi.getLatestVideoAnalysis(newVideoId);
         if (latest && (latest.status === 'completed' || latest.processedFrames > 0)) {
@@ -825,7 +757,6 @@ export const SurveillanceProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
           const aggregatedTargets = Array.from(targetsMap.values()).sort((a, b) => a.trackingId - b.trackingId);
 
-          // Cache the restored session so subsequent checks know it is already loaded
           videoSessionsCacheRef.current.set(newVideoId, {
             analysisId: latest.analysisId,
             status: latest.status === 'completed' ? 'COMPLETED' : 'ANALYZING',
@@ -840,6 +771,7 @@ export const SurveillanceProvider: React.FC<{ children: React.ReactNode }> = ({ 
             totalUniqueTracksCount: latest.uniqueTracksCount || aggregatedTargets.length || 0,
           });
 
+          setIsPrecomputedDemoReplay(false);
           return;
         }
       } catch (err) {
@@ -847,7 +779,100 @@ export const SurveillanceProvider: React.FC<{ children: React.ReactNode }> = ({ 
       }
     }
 
-    // Fresh session
+    // Demo Mode & Static Hosting: check for authentic precomputed benchmark session
+    if (apiModeRef.current === 'DEMO' || !BACKEND_URL) {
+      try {
+        const precomputed = await realSurveillanceApi.loadPrecomputedSession(newVideoId);
+        if (precomputed && Array.isArray(precomputed.tracks) && precomputed.tracks.length > 0) {
+          activeSessionIdRef.current = precomputed.summary?.analysisId || `demo-${newVideoId}`;
+          setAnalysisProgress(100);
+          setAnalysisStatus('COMPLETED');
+          setIsPrecomputedDemoReplay(true);
+
+          frameTracksMapRef.current.clear();
+          frameDetectionsMapRef.current.clear();
+          allTargetsMapRef.current.clear();
+
+          const targetsMap = new Map<number, TrackedObject>();
+          let maxF = 0;
+
+          precomputed.tracks.forEach((f: any) => {
+            if (f.frameIndex !== undefined && f.tracks) {
+              frameTracksMapRef.current.set(f.frameIndex, f.tracks);
+              if (f.frameIndex > maxF) {
+                maxF = f.frameIndex;
+              }
+              const simpleDets = f.tracks.map((t: TrackedObject) => ({
+                id: t.id,
+                trackingId: t.trackingId,
+                className: t.className,
+                confidence: t.confidence,
+                box: t.box,
+                isUnknown: t.isUnknown,
+              }));
+              frameDetectionsMapRef.current.set(f.frameIndex, simpleDets);
+
+              f.tracks.forEach((t: TrackedObject) => {
+                const existing = targetsMap.get(t.trackingId);
+                if (!existing) {
+                  targetsMap.set(t.trackingId, { ...t });
+                } else {
+                  targetsMap.set(t.trackingId, {
+                    ...existing,
+                    ...t,
+                    confidence: Math.max(existing.confidence, t.confidence),
+                    className: (!existing.isUnknown && existing.className) ? existing.className : t.className,
+                    isUnknown: existing.isUnknown && t.isUnknown,
+                    lastSeen: t.lastSeen || existing.lastSeen,
+                  });
+                }
+              });
+            }
+          });
+
+          maxFrameRef.current = maxF;
+          const aggregatedTargets = Array.from(targetsMap.values()).sort((a, b) => a.trackingId - b.trackingId);
+          allTargetsMapRef.current = targetsMap;
+          setAllSessionTargets(aggregatedTargets);
+          setTotalUniqueTracksCount(precomputed.summary?.uniqueTracksCount || aggregatedTargets.length);
+
+          const initialTracks = frameTracksMapRef.current.get(0) || frameTracksMapRef.current.get(5) || [];
+          setTrackedObjects(initialTracks);
+          setRealDetections(frameDetectionsMapRef.current.get(0) || frameDetectionsMapRef.current.get(5) || []);
+
+          setModelConfig({
+            name: "YOLOv8n (Precomputed Benchmark)",
+            version: "8.0.0",
+            weights: "yolov8n.pt (Ultralytics)",
+            inputResolution: "1920x1080 (RGB)",
+            backend: "Precomputed Benchmark Dataset",
+            tracker: "ByteTrack",
+            status: "ACTIVE",
+          });
+
+          videoSessionsCacheRef.current.set(newVideoId, {
+            analysisId: activeSessionIdRef.current,
+            status: 'COMPLETED',
+            progress: 100,
+            trackedObjects: initialTracks,
+            allSessionTargets: aggregatedTargets,
+            realDetections: frameDetectionsMapRef.current.get(0) || [],
+            frameTracks: new Map(frameTracksMapRef.current),
+            frameDetections: new Map(frameDetectionsMapRef.current),
+            unknownObjects: [],
+            activeViolations: [],
+            totalUniqueTracksCount: precomputed.summary?.uniqueTracksCount || aggregatedTargets.length,
+          });
+
+          return;
+        }
+      } catch (err) {
+        console.warn('Precomputed benchmark session load notice:', err);
+      }
+    }
+
+    // Fresh session / Clean Raw Video Playback without precomputed data
+    setIsPrecomputedDemoReplay(false);
     activeSessionIdRef.current = null;
     frameTracksMapRef.current.clear();
     frameDetectionsMapRef.current.clear();
@@ -861,6 +886,84 @@ export const SurveillanceProvider: React.FC<{ children: React.ReactNode }> = ({ 
     setTotalUniqueTracksCount(0);
     setAnalysisProgress(0);
     setAnalysisStatus('IDLE');
+  }, []);
+
+  // Mode switcher
+  const setApiMode = useCallback((mode: ApiMode) => {
+    setApiModeState(mode);
+    setGlobalApiMode(mode);
+    setBackendError(null);
+    if (mode === 'DEMO') {
+      if (activeSourceRef.current?.id) {
+        restoreSessionOrInit(activeSourceRef.current.id);
+      } else {
+        setRealDetections([]);
+        setTrackedObjects([]);
+        setUnknownObjects([]);
+        setActiveViolations([]);
+        setIsPrecomputedDemoReplay(false);
+      }
+    } else {
+      // LIVE AI MODE: Clean state, zero mock leakage
+      setRealDetections([]);
+      setTrackedObjects([]);
+      setUnknownObjects([]);
+      setActiveViolations([]);
+      setIsPrecomputedDemoReplay(false);
+      setModelConfig(prev => ({ ...prev, tracker: 'ByteTrack' }));
+      if (activeSource?.id && BACKEND_URL) {
+        startVideoAnalysisPipeline(activeSource.id);
+      }
+    }
+  }, [activeSource, restoreSessionOrInit, startVideoAnalysisPipeline]);
+
+  // Check backend health periodically
+  useEffect(() => {
+    if (!BACKEND_URL) return; // In Demo Mode without backend URL, skip polling
+    let isMounted = true;
+    const checkHealth = async () => {
+      try {
+        const health = await realSurveillanceApi.getBackendHealth();
+        if (isMounted) {
+          setBackendHealth(health);
+          setBackendError(null);
+          if (health.model.loaded) {
+            setModelConfig({
+              name: health.model.model_name,
+              version: health.model.model_version,
+              weights: `${health.model.model_name} (Ultralytics)`,
+              inputResolution: "640x640 (RGB)",
+              backend: health.device.cuda_available ? "PyTorch / CUDA" : "PyTorch / CPU",
+              tracker: "ByteTrack",
+              status: "ACTIVE",
+            });
+          }
+        }
+      } catch (err: any) {
+        if (isMounted) {
+          setBackendHealth(null);
+          if (apiMode === 'LIVE_AI') {
+            setBackendError('Backend service unreachable. Run "python -m uvicorn app.main:app --port 8000" in backend/ or switch to DEMO MODE.');
+          }
+        }
+      }
+    };
+
+    checkHealth();
+    const interval = setInterval(checkHealth, 10000);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, [apiMode]);
+
+  // Clean up any existing WebSocket on unmount
+  useEffect(() => {
+    return () => {
+      if (activeWsRef.current) {
+        activeWsRef.current.close();
+      }
+    };
   }, []);
 
   // Select Sample Video
@@ -931,20 +1034,11 @@ export const SurveillanceProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
     // 2. ASYNC ANALYSIS: Decoupled background analysis execution
     restoreSessionOrInit(sample.id).then(() => {
-      if (apiModeRef.current === 'LIVE_AI') {
+      if (apiModeRef.current === 'LIVE_AI' && BACKEND_URL) {
         const cached = videoSessionsCacheRef.current.get(sample.id);
         if (!cached || (cached.status !== 'COMPLETED' && cached.status !== 'ANALYZING')) {
           startVideoAnalysisPipeline(sample.id, detectionProfileRef.current);
         }
-      } else {
-        setTrackedObjects(INITIAL_TRACKED_OBJECTS);
-        setUnknownObjects(INITIAL_UNKNOWN_OBJECTS);
-        setActiveViolations(INITIAL_ZONE_VIOLATIONS);
-        setModelConfig(prev => ({
-          ...prev,
-          tracker: 'ByteTrack',
-        }));
-        setAnalysisStatus('ANALYZING');
       }
     }).catch(err => {
       console.warn('Async session restore notice:', err);
@@ -1013,20 +1107,11 @@ export const SurveillanceProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
     // 2. ASYNC ANALYSIS: Decoupled background analysis execution
     restoreSessionOrInit(video.id).then(() => {
-      if (apiModeRef.current === 'LIVE_AI') {
+      if (apiModeRef.current === 'LIVE_AI' && BACKEND_URL) {
         const cached = videoSessionsCacheRef.current.get(video.id);
         if (!cached || (cached.status !== 'COMPLETED' && cached.status !== 'ANALYZING')) {
           startVideoAnalysisPipeline(video.id, detectionProfileRef.current);
         }
-      } else {
-        setTrackedObjects(INITIAL_TRACKED_OBJECTS);
-        setUnknownObjects(INITIAL_UNKNOWN_OBJECTS);
-        setActiveViolations(INITIAL_ZONE_VIOLATIONS);
-        setModelConfig(prev => ({
-          ...prev,
-          tracker: 'ByteTrack',
-        }));
-        setAnalysisStatus('ANALYZING');
       }
     }).catch(err => {
       console.warn('Async session restore notice:', err);
@@ -1076,7 +1161,7 @@ export const SurveillanceProvider: React.FC<{ children: React.ReactNode }> = ({ 
     try {
       const samples = await realSurveillanceApi.getSampleVideos();
       setSampleVideos(samples);
-      if (apiModeRef.current === 'LIVE_AI' && Array.isArray(samples)) {
+      if (apiModeRef.current === 'LIVE_AI' && Array.isArray(samples) && BACKEND_URL) {
         samples.forEach(s => {
           if (s.id) {
             realSurveillanceApi.getLatestVideoAnalysis(s.id).then(latest => {
@@ -1097,36 +1182,15 @@ export const SurveillanceProvider: React.FC<{ children: React.ReactNode }> = ({ 
         }
       } else {
         setActiveSampleVideo(null);
-        setActiveSource({
-          id: '',
-          name: 'No Source Selected',
-          type: 'sample',
-          uri: '',
-          status: 'OFFLINE',
-          location: 'Surveillance Hub',
-          resolution: 'N/A',
-          fps: 0,
-        });
-        setTotalDurationSeconds(0);
-        setIsPlaying(false);
       }
     } catch (err: any) {
-      console.error('Failed to load sample videos from backend:', err);
-      setSampleError(err.message || 'Failed to connect to backend samples archive.');
-      setSampleVideos([]);
-      setActiveSampleVideo(null);
-      setActiveSource({
-        id: '',
-        name: 'Backend Offline',
-        type: 'sample',
-        uri: '',
-        status: 'OFFLINE',
-        location: 'Surveillance Hub',
-        resolution: 'N/A',
-        fps: 0,
-      });
-      setTotalDurationSeconds(0);
-      setIsPlaying(false);
+      console.warn('Sample video discovery fallback to static samples:', err);
+      setSampleVideos(STATIC_SAMPLE_VIDEOS);
+      if (STATIC_SAMPLE_VIDEOS.length > 0) {
+        const chosen = STATIC_SAMPLE_VIDEOS[0];
+        setActiveSampleVideo(chosen);
+        selectSampleVideo(chosen);
+      }
     } finally {
       setIsLoadingSamples(false);
       isRefreshingSamplesRef.current = false;
@@ -1195,61 +1259,20 @@ export const SurveillanceProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
     await refreshUploadedVideos();
 
-    if (apiMode === 'LIVE_AI') {
+    if (apiMode === 'LIVE_AI' && BACKEND_URL) {
       setModelConfig(prev => ({
         ...prev,
         tracker: 'ByteTrack',
       }));
       await startVideoAnalysisPipeline(source.id, detectionProfile, true);
     } else {
-      setTrackedObjects(INITIAL_TRACKED_OBJECTS);
-      setUnknownObjects(INITIAL_UNKNOWN_OBJECTS);
-      setActiveViolations(INITIAL_ZONE_VIOLATIONS);
-      setModelConfig(prev => ({
-        ...prev,
-        tracker: 'ByteTrack',
-      }));
-      setAnalysisStatus('ANALYZING');
+      setIsPrecomputedDemoReplay(false);
+      setAnalysisStatus('IDLE');
     }
   }, [apiMode, saveCurrentSession, refreshUploadedVideos, startVideoAnalysisPipeline, detectionProfile]);
 
-  // Playback simulation loop (ONLY for DEMO mode fallback)
-  useEffect(() => {
-    if (apiMode !== 'DEMO') return;
-    if (!isPlaying || analysisStatus === 'PAUSED' || analysisStatus === 'COMPLETED') return;
-
-    const interval = setInterval(() => {
-      setTrackedObjects(prevObjs => {
-        return prevObjs.map(obj => {
-          if (obj.movementStatus === 'loitering' || obj.movementStatus === 'stationary') {
-            const dwell = (obj.dwellTimeInZone || 0) + 0.5;
-            return {
-              ...obj,
-              dwellTimeInZone: Number(dwell.toFixed(1)),
-              box: {
-                ...obj.box,
-                x: obj.box.x + (Math.random() - 0.5) * 0.08,
-                y: obj.box.y + (Math.random() - 0.5) * 0.08,
-              }
-            };
-          } else {
-            let dx = (Math.random() - 0.5) * 0.3;
-            let dy = (Math.random() - 0.5) * 0.3;
-            return {
-              ...obj,
-              box: {
-                ...obj.box,
-                x: Math.max(5, Math.min(85, obj.box.x + dx)),
-                y: Math.max(5, Math.min(85, obj.box.y + dy)),
-              }
-            };
-          }
-        });
-      });
-    }, 500);
-
-    return () => clearInterval(interval);
-  }, [isPlaying, analysisStatus, apiMode]);
+  // Note: Demo mode relies strictly on verified precomputed benchmark sessions when available.
+  // When no precomputed session is loaded, the raw video plays cleanly without synthesizing fake boxes.
 
   // Recalculate zone evaluation in DEMO mode
   useEffect(() => {
@@ -1300,7 +1323,7 @@ export const SurveillanceProvider: React.FC<{ children: React.ReactNode }> = ({ 
     setCurrentFrame(frame);
     currentFrameRef.current = frame;
 
-    if (apiModeRef.current === 'LIVE_AI') {
+    if (frameTracksMapRef.current.size > 0) {
       let trks = frameTracksMapRef.current.get(frame);
       let dets = frameDetectionsMapRef.current.get(frame);
 
@@ -1323,7 +1346,7 @@ export const SurveillanceProvider: React.FC<{ children: React.ReactNode }> = ({ 
       if (trks) {
         setTrackedObjects(trks);
         setRealDetections(dets || []);
-      } else if (frameTracksMapRef.current.size > 0 && analysisStatusRef.current === 'COMPLETED') {
+      } else if (frameTracksMapRef.current.size > 0) {
         setTrackedObjects([]);
         setRealDetections([]);
       }
@@ -1362,7 +1385,7 @@ export const SurveillanceProvider: React.FC<{ children: React.ReactNode }> = ({ 
     }
     setIsPlaying(true);
     setAnalysisStatus('ANALYZING');
-    if (apiMode === 'LIVE_AI' && activeSource?.id) {
+    if (apiMode === 'LIVE_AI' && activeSource?.id && BACKEND_URL) {
       startVideoAnalysisPipeline(activeSource.id, detectionProfile);
     }
   }, [apiMode, activeSource, detectionProfile, startVideoAnalysisPipeline]);
@@ -1386,7 +1409,7 @@ export const SurveillanceProvider: React.FC<{ children: React.ReactNode }> = ({ 
     currentFrameRef.current = 0;
     setRealDetections([]);
     setAnalysisStatus('IDLE');
-    if (activeSessionIdRef.current) {
+    if (activeSessionIdRef.current && BACKEND_URL) {
       realSurveillanceApi.stopAnalysis(activeSessionIdRef.current);
     }
     if (activeWsRef.current) {
@@ -1405,7 +1428,7 @@ export const SurveillanceProvider: React.FC<{ children: React.ReactNode }> = ({ 
     currentFrameRef.current = 0;
     setIsPlaying(true);
     setAnalysisStatus('ANALYZING');
-    if (activeSource?.id && apiMode === 'LIVE_AI') {
+    if (activeSource?.id && apiMode === 'LIVE_AI' && BACKEND_URL) {
       startVideoAnalysisPipeline(activeSource.id, detectionProfile);
     }
   }, [activeSource, apiMode, detectionProfile, startVideoAnalysisPipeline]);
@@ -1442,7 +1465,7 @@ export const SurveillanceProvider: React.FC<{ children: React.ReactNode }> = ({ 
     const frame = Math.round(seconds * currentFps);
     setCurrentFrame(frame);
     currentFrameRef.current = frame;
-    if (apiModeRef.current === 'LIVE_AI') {
+    if (frameTracksMapRef.current.size > 0) {
       if (frameTracksMapRef.current.has(frame)) {
         const trks = frameTracksMapRef.current.get(frame)!;
         setTrackedObjects(trks);
@@ -1694,6 +1717,7 @@ export const SurveillanceProvider: React.FC<{ children: React.ReactNode }> = ({ 
     activeTracksCount,
     totalUniqueTracksCount,
     analysisStatus,
+    isPrecomputedDemoReplay,
     startAnalysis,
     pauseAnalysis,
     stopAnalysis,
@@ -1784,6 +1808,7 @@ export const SurveillanceProvider: React.FC<{ children: React.ReactNode }> = ({ 
     activeTracksCount,
     totalUniqueTracksCount,
     analysisStatus,
+    isPrecomputedDemoReplay,
     startAnalysis,
     pauseAnalysis,
     stopAnalysis,

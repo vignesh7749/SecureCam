@@ -1,7 +1,8 @@
 import React, { useState, useRef } from 'react';
-import { UploadCloud, FileVideo, AlertCircle, Loader2 } from 'lucide-react';
+import { UploadCloud, FileVideo, AlertCircle, Loader2, Info } from 'lucide-react';
 import { useSurveillance } from '../../context/SurveillanceContext';
 import { surveillanceApi } from '../../services/api';
+import { BACKEND_URL } from '../../services/realApi';
 import { VideoMetadata } from '../../types/video';
 
 interface VideoUploaderProps {
@@ -9,7 +10,7 @@ interface VideoUploaderProps {
 }
 
 export const VideoUploader: React.FC<VideoUploaderProps> = ({ onUploadComplete }) => {
-  const { loadUploadedVideo } = useSurveillance();
+  const { loadUploadedVideo, backendHealth } = useSurveillance();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [isDragging, setIsDragging] = useState(false);
@@ -90,10 +91,16 @@ export const VideoUploader: React.FC<VideoUploaderProps> = ({ onUploadComplete }
         <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
           Upload Video
         </h3>
-        <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-          Select a local video file (MP4, MKV, AVI, WebM) for computer-vision analysis
-        </p>
       </div>
+
+      {(!BACKEND_URL || !backendHealth) && (
+        <div className="bg-amber-500/10 border border-amber-500/30 rounded p-3 text-xs text-amber-900 dark:text-amber-200 flex items-start gap-2">
+          <Info className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+          <p>
+            Video upload and custom video inference require the local FastAPI backend. In Demo Mode, explore the included Sample Videos to see AI surveillance in action.
+          </p>
+        </div>
+      )}
 
       {/* Drag & Drop Zone */}
       <div

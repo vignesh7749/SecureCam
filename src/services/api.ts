@@ -16,7 +16,8 @@ import {
   DEFAULT_SUMMARY_METRICS,
   DEFAULT_SYSTEM_SETTINGS,
   DEFAULT_MODEL_CONFIG,
-  LIVE_CAMERAS
+  LIVE_CAMERAS,
+  STATIC_SAMPLE_VIDEOS
 } from './mockData';
 import { BACKEND_URL } from './apiConfig';
 
@@ -31,6 +32,7 @@ export interface ISurveillanceApi {
   getUploadedVideos(): Promise<SampleVideo[]>;
   getVideoSources(): Promise<VideoSource[]>;
   uploadVideoFile(file: File): Promise<{ source: VideoSource; metadata: VideoMetadata }>;
+  loadPrecomputedSession?(videoId: string): Promise<any>;
   
   // Analysis Session
   startAnalysis(sourceId: string, profile?: string, conf?: number, imgsz?: number, force?: boolean): Promise<AnalysisSession>;
@@ -81,41 +83,65 @@ class MockSurveillanceApi implements ISurveillanceApi {
   private settings: SystemSettings = { ...DEFAULT_SYSTEM_SETTINGS };
 
   async getSampleVideos(): Promise<SampleVideo[]> {
-    if (!BACKEND_URL) return [];
-    try {
-      const res = await fetch(`${BACKEND_URL}/api/v1/video/samples`);
-      if (res.ok) {
-        const data = await res.json();
-        return data.map((item: any) => ({
-          id: item.id,
-          title: item.displayName || item.filename,
-          category: 'Surveillance Video',
-          duration: item.durationFormatted || '00:00',
-          durationSeconds: item.duration || 0,
-          resolution: item.resolution || `${item.width}x${item.height}`,
-          description: `${item.filename}`,
-          difficulty: 'Standard',
-          thumbnailUrl: '',
-          sourceUrl: `${BACKEND_URL}/api/v1/video/${item.id}/stream`,
-          streamUrl: `${BACKEND_URL}/api/v1/video/${item.id}/stream`,
-          filename: item.filename,
-          displayName: item.displayName,
-          width: item.width,
-          height: item.height,
-          fps: item.fps,
-          fileSize: item.fileSize,
-          format: item.format,
-          codec: item.codec,
-          frameCount: item.frameCount,
-          defaultObjectsCount: 0,
-          hasUnknowns: false,
-          hasEmergencyZone: false,
-        }));
+    if (BACKEND_URL) {
+      try {
+        const res = await fetch(`${BACKEND_URL}/api/v1/video/samples`);
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data) && data.length > 0) {
+            return data.map((item: any) => ({
+              id: item.id,
+              title: item.displayName || item.filename,
+              category: 'Surveillance Video',
+              duration: item.durationFormatted || '00:00',
+              durationSeconds: item.duration || 0,
+              resolution: item.resolution || `${item.width}x${item.height}`,
+              description: `${item.filename}`,
+              difficulty: 'Standard',
+              thumbnailUrl: '',
+              sourceUrl: `${BACKEND_URL}/api/v1/video/${item.id}/stream`,
+              streamUrl: `${BACKEND_URL}/api/v1/video/${item.id}/stream`,
+              filename: item.filename,
+              displayName: item.displayName,
+              width: item.width,
+              height: item.height,
+              fps: item.fps,
+              fileSize: item.fileSize,
+              format: item.format,
+              codec: item.codec,
+              frameCount: item.frameCount,
+              defaultObjectsCount: 0,
+              hasUnknowns: false,
+              hasEmergencyZone: false,
+            }));
+          }
+        }
+      } catch {
+        // Backend offline, fallback to static samples
       }
-    } catch {
-      // Backend offline
     }
-    return [];
+    return STATIC_SAMPLE_VIDEOS;
+  }
+
+  async loadPrecomputedSession(videoId: string): Promise<any> {
+    let sessionPath = '';
+    const lower = videoId.toLowerCase();
+    if (lower.includes('testing_1') || lower.includes('testing 1')) {
+      sessionPath = '/samples/sample_testing_1_session.json';
+    } else if (lower.includes('college')) {
+      sessionPath = '/samples/sample_college_testing_file_session.json';
+    }
+    if (!sessionPath) return null;
+
+    try {
+      const res = await fetch(sessionPath);
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (e) {
+      console.warn(`[SecureCam] Could not load precomputed session:`, e);
+    }
+    return null;
   }
 
   async getUploadedVideos(): Promise<SampleVideo[]> {

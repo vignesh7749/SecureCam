@@ -9,7 +9,8 @@ import {
   INITIAL_ZONES, 
   LIVE_CAMERAS, 
   DEFAULT_SYSTEM_SETTINGS, 
-  DEFAULT_SUMMARY_METRICS 
+  DEFAULT_SUMMARY_METRICS,
+  STATIC_SAMPLE_VIDEOS
 } from './mockData';
 
 export { BACKEND_URL, WS_BASE_URL, getWebSocketUrl } from './apiConfig';
@@ -44,6 +45,9 @@ export class RealSurveillanceApi implements ISurveillanceApi {
   private activeSessions: Map<string, string> = new Map(); // videoId -> analysisId
 
   async getBackendHealth(): Promise<RealBackendHealth> {
+    if (!BACKEND_URL) {
+      throw new Error('Backend URL is not configured (running in Demo Mode).');
+    }
     const res = await fetch(`${BACKEND_URL}/api/v1/health`);
     if (!res.ok) {
       throw new Error(`Backend health check failed: HTTP ${res.status}`);
@@ -52,81 +56,115 @@ export class RealSurveillanceApi implements ISurveillanceApi {
   }
 
   async getSampleVideos(): Promise<SampleVideo[]> {
-    const res = await fetch(`${BACKEND_URL}/api/v1/video/samples`);
-    if (!res.ok) {
-      throw new Error(`Failed to fetch sample videos from backend: HTTP ${res.status}`);
-    }
-    const data = await res.json();
-    return data.map((item: any) => {
-      const streamUrl = item.streamUrl?.startsWith('http')
-        ? item.streamUrl
-        : `${BACKEND_URL}${item.streamUrl?.startsWith('/') ? '' : '/'}${item.streamUrl || `api/v1/video/${item.id}/stream`}`;
+    if (BACKEND_URL) {
+      try {
+        const res = await fetch(`${BACKEND_URL}/api/v1/video/samples`);
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data) && data.length > 0) {
+            return data.map((item: any) => {
+              const streamUrl = item.streamUrl?.startsWith('http')
+                ? item.streamUrl
+                : `${BACKEND_URL}${item.streamUrl?.startsWith('/') ? '' : '/'}${item.streamUrl || `api/v1/video/${item.id}/stream`}`;
 
-      return {
-        id: item.id,
-        title: item.displayName || item.filename,
-        category: 'Surveillance Video',
-        duration: item.durationFormatted || `${Math.floor(item.duration / 60)}:${String(Math.floor(item.duration % 60)).padStart(2, '0')}`,
-        durationSeconds: item.duration,
-        resolution: item.resolution || `${item.width}x${item.height}`,
-        description: `${item.filename} (${item.width}x${item.height} @ ${item.fps} FPS)`,
-        difficulty: 'Standard',
-        thumbnailUrl: '',
-        sourceUrl: streamUrl,
-        streamUrl: streamUrl,
-        filename: item.filename,
-        displayName: item.displayName,
-        width: item.width,
-        height: item.height,
-        fps: item.fps,
-        fileSize: item.fileSize,
-        format: item.format,
-        codec: item.codec,
-        frameCount: item.frameCount,
-        defaultObjectsCount: 0,
-        hasUnknowns: false,
-        hasEmergencyZone: false,
-      };
-    });
+              return {
+                id: item.id,
+                title: item.displayName || item.filename,
+                category: 'Surveillance Video',
+                duration: item.durationFormatted || `${Math.floor(item.duration / 60)}:${String(Math.floor(item.duration % 60)).padStart(2, '0')}`,
+                durationSeconds: item.duration,
+                resolution: item.resolution || `${item.width}x${item.height}`,
+                description: `${item.filename} (${item.width}x${item.height} @ ${item.fps} FPS)`,
+                difficulty: 'Standard',
+                thumbnailUrl: '',
+                sourceUrl: streamUrl,
+                streamUrl: streamUrl,
+                filename: item.filename,
+                displayName: item.displayName,
+                width: item.width,
+                height: item.height,
+                fps: item.fps,
+                fileSize: item.fileSize,
+                format: item.format,
+                codec: item.codec,
+                frameCount: item.frameCount,
+                defaultObjectsCount: 0,
+                hasUnknowns: false,
+                hasEmergencyZone: false,
+              };
+            });
+          }
+        }
+      } catch (err) {
+        console.warn('[SecureCam] Live backend samples endpoint unreachable, falling back to static samples:', err);
+      }
+    }
+    return STATIC_SAMPLE_VIDEOS;
+  }
+
+  async loadPrecomputedSession(videoId: string): Promise<any> {
+    let sessionPath = '';
+    const lower = (videoId || '').toLowerCase();
+    if (lower.includes('testing_1') || lower.includes('testing 1')) {
+      sessionPath = '/samples/sample_testing_1_session.json';
+    } else if (lower.includes('college')) {
+      sessionPath = '/samples/sample_college_testing_file_session.json';
+    }
+    if (!sessionPath) return null;
+
+    try {
+      const res = await fetch(sessionPath);
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (e) {
+      console.warn(`[SecureCam] Could not load precomputed session from ${sessionPath}:`, e);
+    }
+    return null;
   }
 
   async getUploadedVideos(): Promise<SampleVideo[]> {
-    const res = await fetch(`${BACKEND_URL}/api/v1/video/uploads`);
-    if (!res.ok) {
-      throw new Error(`Failed to fetch uploaded videos from backend: HTTP ${res.status}`);
-    }
-    const data = await res.json();
-    return data.map((item: any) => {
-      const streamUrl = item.streamUrl?.startsWith('http')
-        ? item.streamUrl
-        : `${BACKEND_URL}${item.streamUrl?.startsWith('/') ? '' : '/'}${item.streamUrl || `api/v1/video/${item.id}/stream`}`;
+    if (!BACKEND_URL) return [];
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/v1/video/uploads`);
+      if (!res.ok) {
+        return [];
+      }
+      const data = await res.json();
+      return data.map((item: any) => {
+        const streamUrl = item.streamUrl?.startsWith('http')
+          ? item.streamUrl
+          : `${BACKEND_URL}${item.streamUrl?.startsWith('/') ? '' : '/'}${item.streamUrl || `api/v1/video/${item.id}/stream`}`;
 
-      return {
-        id: item.id,
-        title: item.displayName || item.filename,
-        category: 'Uploaded Video',
-        duration: item.durationFormatted || `${Math.floor(item.duration / 60)}:${String(Math.floor(item.duration % 60)).padStart(2, '0')}`,
-        durationSeconds: item.duration,
-        resolution: item.resolution || `${item.width}x${item.height}`,
-        description: `${item.filename} (${item.width}x${item.height} @ ${item.fps} FPS)`,
-        difficulty: 'Standard',
-        thumbnailUrl: '',
-        sourceUrl: streamUrl,
-        streamUrl: streamUrl,
-        filename: item.filename,
-        displayName: item.displayName,
-        width: item.width,
-        height: item.height,
-        fps: item.fps,
-        fileSize: item.fileSize,
-        format: item.format,
-        codec: item.codec,
-        frameCount: item.frameCount,
-        defaultObjectsCount: 0,
-        hasUnknowns: false,
-        hasEmergencyZone: false,
-      };
-    });
+        return {
+          id: item.id,
+          title: item.displayName || item.filename,
+          category: 'Uploaded Video',
+          duration: item.durationFormatted || `${Math.floor(item.duration / 60)}:${String(Math.floor(item.duration % 60)).padStart(2, '0')}`,
+          durationSeconds: item.duration,
+          resolution: item.resolution || `${item.width}x${item.height}`,
+          description: `${item.filename} (${item.width}x${item.height} @ ${item.fps} FPS)`,
+          difficulty: 'Standard',
+          thumbnailUrl: '',
+          sourceUrl: streamUrl,
+          streamUrl: streamUrl,
+          filename: item.filename,
+          displayName: item.displayName,
+          width: item.width,
+          height: item.height,
+          fps: item.fps,
+          fileSize: item.fileSize,
+          format: item.format,
+          codec: item.codec,
+          frameCount: item.frameCount,
+          defaultObjectsCount: 0,
+          hasUnknowns: false,
+          hasEmergencyZone: false,
+        };
+      });
+    } catch {
+      return [];
+    }
   }
 
   async getVideoSources(): Promise<VideoSource[]> {
@@ -134,6 +172,7 @@ export class RealSurveillanceApi implements ISurveillanceApi {
   }
 
   async uploadVideoFile(file: File): Promise<{ source: VideoSource; metadata: VideoMetadata }> {
+    assertBackendConfigured();
     const formData = new FormData();
     formData.append('file', file);
 
@@ -189,6 +228,7 @@ export class RealSurveillanceApi implements ISurveillanceApi {
     imgsz?: number,
     force: boolean = false
   ): Promise<AnalysisSession> {
+    assertBackendConfigured();
     const url = new URL(`${BACKEND_URL}/api/v1/analyze/${videoId}`);
     if (profile) {
       url.searchParams.set('profile', profile);

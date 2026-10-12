@@ -6,6 +6,7 @@ import { ZoneConfigModal } from '../components/zones/ZoneConfigModal';
 import { ZoneOverlay } from '../components/surveillance/ZoneOverlay';
 import { ZoneEditorCanvas } from '../components/surveillance/ZoneEditorCanvas';
 import { Button } from '../components/common/Button';
+import { BACKEND_URL } from '../services/realApi';
 import { 
   ShieldCheck, 
   ShieldAlert, 
@@ -41,6 +42,7 @@ export const EmergencyZonesPage: React.FC = () => {
     finishDraftZone,
     cancelDraftZone,
     activeSource,
+    backendHealth,
   } = useSurveillance();
 
   const [editingZone, setEditingZone] = useState<SecurityZone | null>(null);
@@ -75,6 +77,16 @@ export const EmergencyZonesPage: React.FC = () => {
           {isZoneEditMode ? 'Cancel Drawing' : '+ CREATE ZONE'}
         </Button>
       </div>
+
+      {/* Demo Mode Notice: In-memory zone evaluation */}
+      {(!BACKEND_URL || !backendHealth) && (
+        <div className="bg-amber-500/10 border border-amber-500/30 rounded p-3 text-xs text-amber-900 dark:text-amber-200 flex items-start gap-2">
+          <Info className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+          <p>
+            In Demo Mode, emergency zones operate dynamically in-memory. You can draw zones and test intrusion/dwell rules against replaying benchmark tracks; changes are not persisted to a backend server.
+          </p>
+        </div>
+      )}
 
       {/* Compact Zone Drawing Canvas Preview (ONLY shown when drawing/creating a zone) */}
       {isZoneEditMode && (

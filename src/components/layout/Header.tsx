@@ -117,15 +117,21 @@ export const Header: React.FC<HeaderProps> = ({ onOpenViolations, onOpenTutorial
             <span className="hidden sm:inline">Tutorial</span>
           </button>
 
-          {/* Backend Status Dot / Pill */}
+          {/* Backend / Demo Mode Status Dot / Pill */}
           <div 
-            title={`Backend: ${isBackendHealthy ? 'Connected' : 'Offline'}`}
+            title={
+              isBackendHealthy 
+                ? 'Backend: Connected (Live FastAPI)' 
+                : 'Demo Mode: Active with precomputed benchmark data. FastAPI backend is offline.'
+            }
             className="flex items-center gap-1.5 px-2 sm:px-2.5 py-1.5 sm:py-1 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded text-xs min-h-[34px]"
           >
             <span className={`w-2 h-2 rounded-full ${isBackendHealthy ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-            <span className="text-slate-600 dark:text-slate-300 hidden sm:inline">Backend:</span>
-            <span className={`font-medium hidden sm:inline ${isBackendHealthy ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>
-              {isBackendHealthy ? 'Connected' : 'Offline'}
+            <span className="text-slate-600 dark:text-slate-300 hidden sm:inline">
+              {isBackendHealthy ? 'Backend:' : 'Mode:'}
+            </span>
+            <span className={`font-medium ${isBackendHealthy ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>
+              {isBackendHealthy ? 'Connected' : 'Demo Mode'}
             </span>
           </div>
 

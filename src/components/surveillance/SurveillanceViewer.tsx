@@ -26,6 +26,7 @@ export const SurveillanceViewer: React.FC<SurveillanceViewerProps> = ({
 
   const {
     apiMode,
+    isPrecomputedDemoReplay,
     realDetections,
     registerVideoElement,
     onVideoTimeUpdate,
@@ -383,11 +384,28 @@ export const SurveillanceViewer: React.FC<SurveillanceViewerProps> = ({
             />
 
             {/* Layer 5: Subtle Video HUD Overlay (z-40) */}
-            <div className="absolute top-3 left-3 z-40 flex items-center gap-2 pointer-events-none">
+            <div className="absolute top-3 left-3 z-40 flex flex-wrap items-center gap-2 pointer-events-none">
               {activeSource.name && (
                 <div className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-slate-900/80 border border-slate-700/80 text-xs text-slate-200 backdrop-blur-sm">
                   <span className="w-2 h-2 rounded-full bg-blue-500" />
                   <span className="font-medium">{activeSource.name}</span>
+                </div>
+              )}
+
+              {apiMode === 'LIVE_AI' ? (
+                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-emerald-950/80 border border-emerald-500/50 text-xs text-emerald-300 font-semibold backdrop-blur-sm shadow-sm">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                  <span>[LIVE AI: Ultralytics YOLOv8]</span>
+                </div>
+              ) : isPrecomputedDemoReplay ? (
+                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-amber-950/80 border border-amber-500/50 text-xs text-amber-300 font-semibold backdrop-blur-sm shadow-sm">
+                  <span className="w-2 h-2 rounded-full bg-amber-400" />
+                  <span>[DEMO MODE: PRECOMPUTED BENCHMARK REPLAY]</span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-slate-900/80 border border-slate-700/80 text-xs text-slate-300 font-medium backdrop-blur-sm shadow-sm">
+                  <span className="w-2 h-2 rounded-full bg-slate-400" />
+                  <span>[Raw Video Playback — Live AI requires local backend]</span>
                 </div>
               )}
 
