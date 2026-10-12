@@ -12,12 +12,8 @@ import {
   DEFAULT_SUMMARY_METRICS 
 } from './mockData';
 
-export const BACKEND_URL = (import.meta as any).env?.VITE_BACKEND_URL || (
-  typeof window !== 'undefined' && window.location.hostname && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
-    ? `${window.location.protocol}//${window.location.hostname}:8000`
-    : 'http://localhost:8000'
-);
-export const WS_BASE_URL = BACKEND_URL.replace(/^http/, 'ws');
+export { BACKEND_URL, WS_BASE_URL, getWebSocketUrl } from './apiConfig';
+import { BACKEND_URL, WS_BASE_URL, assertBackendConfigured } from './apiConfig';
 
 export interface RealBackendHealth {
   status: string;
@@ -313,6 +309,11 @@ export class RealSurveillanceApi implements ISurveillanceApi {
     onError?: (error: any) => void,
     onClose?: () => void
   ): WebSocket {
+    if (!WS_BASE_URL) {
+      const err = new Error('Cannot connect analysis WebSocket: VITE_BACKEND_URL is not configured.');
+      if (onError) onError(err);
+      throw err;
+    }
     const wsUrl = `${WS_BASE_URL}/ws/analysis/${analysisId}`;
     const ws = new WebSocket(wsUrl);
 

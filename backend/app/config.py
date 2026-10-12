@@ -61,13 +61,33 @@ class Settings:
         "PERFORMANCE": {"imgsz": 640, "conf": 0.25, "iou": 0.45},
     }
     
-    # CORS
-    CORS_ORIGINS: list = [
+    # CORS Configuration
+    DEFAULT_CORS_ORIGINS: list = [
         "http://localhost:5173",
         "http://127.0.0.1:5173",
         "http://localhost:3000",
-        "*"
+        "http://127.0.0.1:3000",
+        "http://localhost:4173",
+        "http://127.0.0.1:4173",
     ]
+
+    @property
+    def CORS_ORIGINS(self) -> list:
+        if hasattr(self, "_cors_origins") and self._cors_origins is not None:
+            return self._cors_origins
+        origins = list(self.DEFAULT_CORS_ORIGINS)
+        custom_origins = os.getenv("CORS_ALLOWED_ORIGINS", "")
+        if custom_origins:
+            for origin in custom_origins.split(","):
+                cleaned = origin.strip().rstrip("/")
+                if cleaned and cleaned not in origins and cleaned != "*":
+                    origins.append(cleaned)
+        # Never combine wildcard '*' with credentialed requests (CORS spec restriction)
+        return [o for o in origins if o != "*"]
+
+    @CORS_ORIGINS.setter
+    def CORS_ORIGINS(self, value: list):
+        self._cors_origins = value
 
 settings = Settings()
 

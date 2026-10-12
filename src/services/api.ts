@@ -18,6 +18,7 @@ import {
   DEFAULT_MODEL_CONFIG,
   LIVE_CAMERAS
 } from './mockData';
+import { BACKEND_URL } from './apiConfig';
 
 /**
  * Platform API interface.
@@ -80,9 +81,9 @@ class MockSurveillanceApi implements ISurveillanceApi {
   private settings: SystemSettings = { ...DEFAULT_SYSTEM_SETTINGS };
 
   async getSampleVideos(): Promise<SampleVideo[]> {
-    const backendUrl = (import.meta as any).env?.VITE_BACKEND_URL || 'http://localhost:8000';
+    if (!BACKEND_URL) return [];
     try {
-      const res = await fetch(`${backendUrl}/api/v1/video/samples`);
+      const res = await fetch(`${BACKEND_URL}/api/v1/video/samples`);
       if (res.ok) {
         const data = await res.json();
         return data.map((item: any) => ({
@@ -95,8 +96,8 @@ class MockSurveillanceApi implements ISurveillanceApi {
           description: `${item.filename}`,
           difficulty: 'Standard',
           thumbnailUrl: '',
-          sourceUrl: `${backendUrl}/api/v1/video/${item.id}/stream`,
-          streamUrl: `${backendUrl}/api/v1/video/${item.id}/stream`,
+          sourceUrl: `${BACKEND_URL}/api/v1/video/${item.id}/stream`,
+          streamUrl: `${BACKEND_URL}/api/v1/video/${item.id}/stream`,
           filename: item.filename,
           displayName: item.displayName,
           width: item.width,
@@ -118,9 +119,9 @@ class MockSurveillanceApi implements ISurveillanceApi {
   }
 
   async getUploadedVideos(): Promise<SampleVideo[]> {
-    const backendUrl = (import.meta as any).env?.VITE_BACKEND_URL || 'http://localhost:8000';
+    if (!BACKEND_URL) return [];
     try {
-      const res = await fetch(`${backendUrl}/api/v1/video/uploads`);
+      const res = await fetch(`${BACKEND_URL}/api/v1/video/uploads`);
       if (res.ok) {
         const data = await res.json();
         return data.map((item: any) => ({
@@ -133,8 +134,8 @@ class MockSurveillanceApi implements ISurveillanceApi {
           description: `${item.filename}`,
           difficulty: 'Standard',
           thumbnailUrl: '',
-          sourceUrl: `${backendUrl}/api/v1/video/${item.id}/stream`,
-          streamUrl: `${backendUrl}/api/v1/video/${item.id}/stream`,
+          sourceUrl: `${BACKEND_URL}/api/v1/video/${item.id}/stream`,
+          streamUrl: `${BACKEND_URL}/api/v1/video/${item.id}/stream`,
           filename: item.filename,
           displayName: item.displayName,
           width: item.width,
@@ -206,9 +207,9 @@ class MockSurveillanceApi implements ISurveillanceApi {
   }
 
   async getLatestVideoAnalysis(videoId: string): Promise<any> {
-    const backendUrl = (import.meta as any).env?.VITE_BACKEND_URL || 'http://localhost:8000';
+    if (!BACKEND_URL) return null;
     try {
-      const res = await fetch(`${backendUrl}/api/v1/analyze/video/${videoId}/latest`);
+      const res = await fetch(`${BACKEND_URL}/api/v1/analyze/video/${videoId}/latest`);
       if (res.ok) return res.json();
     } catch {}
     return null;

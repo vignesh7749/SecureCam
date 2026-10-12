@@ -176,4 +176,53 @@ def test_upload_deduplication_single_stored_video(sample_mp4):
         matching = [u for u in uploads if u["id"] == video_id1 or u.get("videoId") == video_id1]
         assert len(matching) == 1
 
+def test_cors_configuration_defaults_and_custom(monkeypatch):
+    """
+    Verify that CORS_ALLOWED_ORIGINS environment variable:
+    1. Preserves localhost defaults
+    2. Strips whitespace, trailing slashes, and wildcards
+    3. Excludes wildcard '*' to remain compliant with credentialed requests
+    """
+    from app.config import settings
+
+    # Ensure clean state
+    if hasattr(settings, "_cors_origins"):
+        delattr(settings, "_cors_origins")
+
+    # 1. Defaults check
+    assert "http://localhost:5173" in settings.CORS_ORIGINS
+    assert "http://127.0.0.1:5173" in settings.CORS_ORIGINS
+    assert "*" not in settings.CORS_ORIGINS
+
+    # 2. Custom environment variable check
+    monkeypatch.setenv("CORS_ALLOWED_ORIGINS", "https://securecam.vercel.app, https://custom-domain.com/, *")
+    if hasattr(settings, "_cors_origins"):
+        delattr(settings, "_cors_origins")
+
+    origins = settings.CORS_ORIGINS
+    assert "https://securecam.vercel.app" in origins
+    assert "https://custom-domain.com" in origins
+    assert "*" not in origins
+
+    # Cleanup
+    if hasattr(settings, "_cors_origins"):
+        delattr(settings, "_cors_origins")
+
+def test_cors_preflight_and_headers():
+    """
+    Verify that FastAPI returns Access-Control-Allow-Origin and credentials
+    for allowed origins during preflight and actual requests.
+    """
+    with TestClient(app) as client:
+        res = client.options(
+            "/api/v1/health",
+            headers={
+                "Origin": "http://localhost:5173",
+                "Access-Control-Request-Method": "GET"
+            }
+        )
+        assert res.status_code == 200
+        assert res.headers.get("access-control-allow-origin") == "http://localhost:5173"
+        assert res.headers.get("access-control-allow-credentials") == "true"
+
 

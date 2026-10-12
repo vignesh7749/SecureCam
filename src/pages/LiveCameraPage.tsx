@@ -275,6 +275,14 @@ export const LiveCameraPage: React.FC = () => {
       } catch {}
     }
 
+    if (!WS_BASE_URL) {
+      setConnectionStatus('error');
+      setErrorMessage(
+        'Live Feed requires a configured backend. VITE_BACKEND_URL is missing in this production deployment. Please set VITE_BACKEND_URL in your hosting provider settings (e.g. Vercel) and redeploy.'
+      );
+      return;
+    }
+
     setConnectionStatus('connecting');
     const wsUrl = `${WS_BASE_URL}/ws/live-feed`;
     let ws: WebSocket;
