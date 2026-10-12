@@ -1,0 +1,341 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: dark;
+    --bg-page: #0b0f17;
+    --bg-surface: #0f172a;
+    --bg-card: #141d2e;
+    --bg-elevated: #1e293b;
+    --border-main: #334155;
+    --border-subtle: #1e293b;
+    --text-primary: #f8fafc;
+    --text-secondary: #cbd5e1;
+    --text-muted: #94a3b8;
+    --accent: #3b82f6;
+  }
+
+  html.light {
+    color-scheme: light;
+    --bg-page: #f8fafc;
+    --bg-surface: #ffffff;
+    --bg-card: #ffffff;
+    --bg-elevated: #f1f5f9;
+    --border-main: #cbd5e1;
+    --border-subtle: #e2e8f0;
+    --text-primary: #0f172a;
+    --text-secondary: #334155;
+    --text-muted: #64748b;
+    --accent: #2563eb;
+  }
+
+  body {
+    background-color: var(--bg-page);
+    color: var(--text-secondary);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    overflow-x: hidden;
+    transition: background-color 0.15s ease, color 0.15s ease;
+  }
+}
+
+/* ==========================================================================
+   GLOBAL LIGHT THEME OVERRIDES
+   Ensures all cards, panels, tables, forms, and headers transition to clean,
+   professional light mode surfaces without leaving dark artifacts behind.
+   ========================================================================== */
+
+html.light body {
+  background-color: #f8fafc;
+  color: #334155;
+}
+
+/* Main Layout Page Background */
+html.light .bg-slate-950,
+html.light .bg-surveillance-950 {
+  background-color: #f8fafc !important;
+}
+
+/* Headers, Navigation, Footers, and Primary Surface Panels */
+html.light header,
+html.light nav,
+html.light footer,
+html.light .bg-slate-900:not(.video-canvas-container):not(.aspect-video):not(.video-element),
+html.light .bg-surveillance-900 {
+  background-color: #ffffff !important;
+}
+
+/* Cards & Elevated Panels */
+html.light .bg-slate-850,
+html.light .bg-surveillance-850 {
+  background-color: #ffffff !important;
+}
+
+html.dark .bg-slate-850,
+html.dark .bg-surveillance-850,
+:root:not(.light) .bg-slate-850 {
+  background-color: #0F1522 !important;
+}
+
+html.dark .bg-slate-750,
+html.dark .bg-surveillance-750,
+:root:not(.light) .bg-slate-750 {
+  background-color: #1A253A !important;
+}
+
+html.light .bg-slate-800:not(.video-control-pill):not([class*="bg-blue"]):not([class*="bg-red"]):not([class*="bg-emerald"]),
+html.light .bg-surveillance-800:not([class*="bg-blue"]):not([class*="bg-red"]) {
+  background-color: #f8fafc !important;
+}
+
+html.light .bg-slate-800\/80,
+html.light .bg-slate-800\/60,
+html.light .bg-slate-800\/40,
+html.light .bg-surveillance-800\/60 {
+  background-color: #f1f5f9 !important;
+}
+
+html.light .bg-slate-750,
+html.light .bg-surveillance-750 {
+  background-color: #f1f5f9 !important;
+}
+
+html.light .bg-slate-700:not([class*="bg-blue"]):not([class*="bg-red"]):not([class*="bg-emerald"]),
+html.light .bg-surveillance-700 {
+  background-color: #e2e8f0 !important;
+}
+
+/* Borders */
+html.light .border-slate-800,
+html.light .border-slate-800\/80,
+html.light .border-surveillance-800,
+html.light .border-surveillance-700,
+html.light .border-surveillance-700\/80,
+html.light .border-surveillance-600 {
+  border-color: #e2e8f0 !important;
+}
+
+html.light .border-slate-700,
+html.light .border-slate-700\/80 {
+  border-color: #cbd5e1 !important;
+}
+
+/* Typography Hierarchy in Light Mode */
+html.light .text-white:not(.aspect-video *):not([class*="bg-blue"]):not([class*="bg-red"]):not([class*="bg-emerald"]):not([class*="bg-purple"]):not([class*="bg-amber"]):not([class*="bg-indigo"]):not(.keep-white) {
+  color: #0f172a !important;
+}
+
+html.light .text-slate-200:not(.aspect-video *):not([class*="bg-blue"]):not([class*="bg-red"]),
+html.light .text-surveillance-100,
+html.light .text-surveillance-200 {
+  color: #1e293b !important;
+}
+
+html.light .text-slate-300:not(.aspect-video *),
+html.light .text-surveillance-300 {
+  color: #334155 !important;
+}
+
+html.light .text-slate-400:not(.aspect-video *),
+html.light .text-surveillance-400 {
+  color: #64748b !important;
+}
+
+html.light .text-slate-500:not(.aspect-video *),
+html.light .text-surveillance-500 {
+  color: #64748b !important;
+}
+
+/* Modals & Dialogs in Light Mode */
+html.light .bg-slate-900.shadow-2xl,
+html.light .bg-surveillance-850.shadow-2xl {
+  background-color: #ffffff !important;
+  border-color: #e2e8f0 !important;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1) !important;
+}
+
+/* Input Fields & Textareas in Light Mode */
+html.light input,
+html.light select,
+html.light textarea {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border-color: #cbd5e1 !important;
+}
+
+html.light input::placeholder,
+html.light textarea::placeholder {
+  color: #94a3b8 !important;
+}
+
+/* Clean Professional Table Rows in Light Mode */
+html.light tr:hover {
+  background-color: #f8fafc !important;
+}
+
+/* ==========================================================================
+   VIDEO SCREEN & DETECTION OVERLAY PROTECTION (SAFETY MANDATE)
+   The video canvas, bounding boxes, labels, and zone lines MUST remain
+   100% visible and unaffected regardless of whether light or dark theme is active.
+   ========================================================================== */
+
+.aspect-video,
+.aspect-video.bg-black {
+  background-color: #000000 !important;
+}
+
+/* Maintain high-contrast bounding box tags & zone tags inside video */
+.aspect-video .text-white {
+  color: #ffffff !important;
+}
+
+.aspect-video .bg-blue-600 {
+  background-color: #2563eb !important;
+}
+
+.aspect-video .bg-amber-600 {
+  background-color: #d97706 !important;
+}
+
+.aspect-video .bg-red-600 {
+  background-color: #dc2626 !important;
+}
+
+/* ==========================================================================
+   CLEAN RESPONSIVE SCROLLBARS
+   ========================================================================== */
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+/* Dark Mode Scrollbar */
+html.dark ::-webkit-scrollbar-track,
+:root:not(.light) ::-webkit-scrollbar-track {
+  background: #0f172a;
+}
+
+html.dark ::-webkit-scrollbar-thumb,
+:root:not(.light) ::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 3px;
+}
+
+html.dark ::-webkit-scrollbar-thumb:hover,
+:root:not(.light) ::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}
+
+/* Light Mode Scrollbar */
+html.light ::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+
+html.light ::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+}
+
+html.light ::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* ==========================================================================
+   TRUE FULLSCREEN VIDEO PLAYER CONTAINER
+   When the player container enters fullscreen:
+   Occupies 100vw x 100vh with black background, controls docked at bottom.
+   ========================================================================== */
+
+.securecam-player-fullscreen:fullscreen,
+.securecam-player-fullscreen:-webkit-full-screen,
+.securecam-player-fullscreen:-moz-full-screen,
+.securecam-player-fullscreen:-ms-fullscreen,
+.securecam-player-fullscreen.is-fullscreen {
+  width: 100vw !important;
+  height: 100vh !important;
+  max-width: 100vw !important;
+  max-height: 100vh !important;
+  background-color: #000000 !important;
+  border-radius: 0 !important;
+  border: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: space-between !important;
+  overflow: hidden !important;
+  z-index: 9999 !important;
+}
+
+/* Ensure controls in fullscreen remain high-contrast, visible, and docked */
+.securecam-player-fullscreen:fullscreen .player-controls-bar,
+.securecam-player-fullscreen:-webkit-full-screen .player-controls-bar,
+.securecam-player-fullscreen.is-fullscreen .player-controls-bar {
+  flex-shrink: 0;
+  width: 100%;
+  background-color: #0b0f17 !important;
+  border-top: 1px solid #1e293b !important;
+  z-index: 50;
+}
+
+/* ==========================================================================
+   DEDICATED SECURECAM PDF & PRINT REPORT STYLING
+   Isolates #securecam-printable-report on clean white layout and hides web UI
+   ========================================================================== */
+
+@media print {
+  html, body {
+    background: #ffffff !important;
+    color: #000000 !important;
+    font-size: 11pt !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* Hide navigation, headers, footers, buttons, and all page chrome */
+  header, nav, footer, .no-print, button, input, select {
+    display: none !important;
+  }
+
+  body * {
+    visibility: hidden;
+  }
+
+  #securecam-printable-report,
+  #securecam-printable-report * {
+    visibility: visible;
+  }
+
+  #securecam-printable-report {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 15mm !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    box-shadow: none !important;
+    border: none !important;
+  }
+
+  #securecam-printable-report table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+  }
+
+  #securecam-printable-report th,
+  #securecam-printable-report td {
+    border: 1px solid #cbd5e1 !important;
+    color: #0f172a !important;
+    padding: 6px 10px !important;
+  }
+
+  #securecam-printable-report thead {
+    background-color: #f1f5f9 !important;
+  }
+}
+

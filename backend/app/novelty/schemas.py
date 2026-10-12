@@ -1,0 +1,80 @@
+from typing import List, Optional, Dict, Any
+from pydantic import BaseModel, Field
+from app.detection.schemas import BoundingBox
+
+class EmbeddingRecord(BaseModel):
+    frameIndex: int = Field(..., description="Frame index where embedding was computed")
+    timestamp: float = Field(..., description="Timestamp in seconds")
+    vector: List[float] = Field(..., description="L2-normalized feature embedding vector")
+    cropQuality: float = Field(..., description="Visual quality metric of crop (0.0 to 1.0)")
+    box: BoundingBox = Field(..., description="Bounding box at time of embedding")
+
+class PrototypeRecord(BaseModel):
+    className: str = Field(..., description="Known object class name")
+    prototypeVector: List[float] = Field(..., description="Mean unit embedding prototype vector")
+    sampleCount: int = Field(..., description="Total reference samples contributing to prototype")
+    meanDistance: float = Field(default=0.15, description="Mean intra-class cosine distance")
+    stdDistance: float = Field(default=0.05, description="Standard deviation of intra-class distance")
+
+class NoveltyEvaluation(BaseModel):
+    trackId: int = Field(..., description="ByteTrack integer track ID")
+    className: str = Field(..., description="YOLO detector predicted class name")
+    detectorConfidence: float = Field(..., description="YOLO detector classification confidence (0.0 to 1.0)")
+    noveltyScore: float = Field(..., description="Computed multi-signal novelty score (0.0 to 100.0)")
+    visualEmbeddingDistance: float = Field(..., description="Cosine distance to closest known prototype (0.0 to 2.0)")
+    topKnownClass: str = Field(..., description="Closest known class prototype name")
+    topKnownSimilarity: float = Field(..., description="Cosine similarity to closest known class (0.0 to 1.0)")
+    cropQuality: float = Field(..., description="Crop spatial and resolution quality score (0.0 to 1.0)")
+    isSmallObject: bool = Field(default=False, description="Flag if crop is smaller than reliable embedding resolution")
+    isOccluded: bool = Field(default=False, description="Flag if target is partially occluded")
+    qualityStatus: str = Field(default="VALID", description="Crop status: VALID, INSUFFICIENT_VISUAL_EVIDENCE, LOW_VISUAL_QUALITY")
+    noveltyState: str = Field(default="NORMAL", description="Lifecycle: NORMAL, SUSPICIOUS, NOVELTY_CANDIDATE, CONFIRMED_UNKNOWN, RESOLVED")
+    consecutiveNovelFrames: int = Field(default=0, description="Consecutive frames observing elevated novelty")
+    framesObserved: int = Field(default=1, description="Total frames observed for this track")
+    persistenceScore: float = Field(default=0.0, description="Temporal persistence score percentage (0.0 to 100.0)")
+
+class UnknownObject(BaseModel):
+    id: str = Field(..., description="Unique unknown object identifier, e.g. unknown-01 or track_4")
+    trackId: int = Field(..., description="Underlying ByteTrack persistent tracking ID")
+    trackingId: int = Field(..., description="Integer tracking ID alias for UI compatibility")
+    className: str = Field(default="unknown", description="Object label: unknown or novel")
+    confidence: float = Field(..., description="YOLO detector confidence (0.0 to 1.0)")
+    noveltyScore: float = Field(..., description="Measured novelty evidence score (0.0 to 100.0)")
+    persistenceScore: float = Field(..., description="Temporal stability score (0.0 to 100.0)")
+    framesObserved: int = Field(..., description="Total observation frames")
+    firstSeen: str = Field(..., description="ISO timestamp or time string when object first detected")
+    lastSeen: str = Field(..., description="ISO timestamp or time string of most recent observation")
+    durationSeconds: float = Field(default=0.0, description="Duration in seconds")
+    box: BoundingBox = Field(..., description="Latest normalized bounding box")
+    embeddingDistance: float = Field(..., description="Distance to nearest known prototype")
+    topKnownClass: str = Field(..., description="Nearest known class name")
+    topKnownSimilarity: float = Field(..., description="Similarity to nearest known class")
+    noveltyState: str = Field(..., description="Lifecycle state: NOVELTY_CANDIDATE, CONFIRMED_UNKNOWN, RESOLVED")
+    investigationStatus: str = Field(default="INVESTIGATE", description="Operator status: INVESTIGATE, FLAGGED, RESOLVED, DISMISSED")
+    clusterId: Optional[str] = Field(default=None, description="Assigned DBSCAN anomaly cluster ID")
+    currentZoneId: Optional[str] = Field(default=None, description="Security zone ID if inside a zone")
+    currentZoneName: Optional[str] = Field(default=None, description="Security zone name if inside a zone")
+    movementStatus: str = Field(default="moving", description="Movement status: moving, stationary, loitering")
+    velocityPixelsPerSec: Optional[float] = Field(default=None, description="Displacement speed in px/s")
+    isUnknown: bool = Field(default=True, description="Strictly True for unknown objects")
+    notes: Optional[str] = Field(default=None, description="Operator notes")
+
+class ClusterSummary(BaseModel):
+    clusterId: str = Field(..., description="Cluster identifier, e.g. NOVEL_CLUSTER_01")
+    observationCount: int = Field(..., description="Number of embeddings assigned to cluster")
+    uniqueTrackCount: int = Field(..., description="Number of unique tracks assigned to cluster")
+    centroidEmbedding: List[float] = Field(..., description="Cluster centroid embedding vector")
+    meanNoveltyScore: float = Field(..., description="Average novelty score of cluster members")
+    firstSeen: str = Field(..., description="First observation timestamp")
+    lastSeen: str = Field(..., description="Latest observation timestamp")
+
+class CalibrationResult(BaseModel):
+    model: str = Field(..., description="Visual embedding model used")
+    threshold: float = Field(..., description="Evaluated novelty score threshold (0-100)")
+    totalKnownEvaluated: int = Field(..., description="Total known object crops tested")
+    avgKnownNoveltyScore: float = Field(..., description="Mean novelty score on known objects")
+    falseUnknownRate: float = Field(..., description="Percentage of known objects falsely labeled novel")
+    totalNovelEvaluated: int = Field(..., description="Total novel/out-of-distribution crops tested")
+    avgNovelNoveltyScore: float = Field(..., description="Mean novelty score on novel objects")
+    missedNoveltyRate: float = Field(..., description="Percentage of novel objects missed")
+    statusMessage: str = Field(..., description="Calibration status and academic integrity notice")

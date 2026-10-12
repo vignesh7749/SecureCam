@@ -1,0 +1,126 @@
+{
+  "zones": [
+    {
+      "id": "zone-01",
+      "name": "Emergency Zone 01 (Substation)",
+      "type": "emergency",
+      "shape": "rectangle",
+      "points": [
+        {
+          "x": 18.0,
+          "y": 32.0
+        },
+        {
+          "x": 52.0,
+          "y": 32.0
+        },
+        {
+          "x": 52.0,
+          "y": 78.0
+        },
+        {
+          "x": 18.0,
+          "y": 78.0
+        }
+      ],
+      "alertLevel": "critical",
+      "stayThresholdSeconds": 10.0,
+      "monitoredObjects": [
+        "person",
+        "vehicle",
+        "unknown"
+      ],
+      "alertActions": {
+        "visualAlert": true,
+        "audibleAlarm": true,
+        "eventLog": true,
+        "webhookNotification": true
+      },
+      "enabled": true,
+      "color": "#EF4444",
+      "createdAt": "2026-10-01 08:30:00",
+      "description": "High voltage transformer perimeter. Zero loitering tolerance."
+    },
+    {
+      "id": "zone-02",
+      "name": "Loading Bay Caution Buffer",
+      "type": "caution",
+      "shape": "polygon",
+      "points": [
+        {
+          "x": 62.0,
+          "y": 22.0
+        },
+        {
+          "x": 92.0,
+          "y": 26.0
+        },
+        {
+          "x": 88.0,
+          "y": 84.0
+        },
+        {
+          "x": 58.0,
+          "y": 72.0
+        }
+      ],
+      "alertLevel": "medium",
+      "stayThresholdSeconds": 30.0,
+      "monitoredObjects": [
+        "person",
+        "vehicle",
+        "bicycle"
+      ],
+      "alertActions": {
+        "visualAlert": true,
+        "audibleAlarm": false,
+        "eventLog": true,
+        "webhookNotification": false
+      },
+      "enabled": true,
+      "color": "#F59E0B",
+      "createdAt": "2026-10-01 09:15:00",
+      "description": "Heavy machinery turnaround zone. Forklift and truck clearance."
+    },
+    {
+      "id": "zone-03",
+      "name": "North Gate Turnstile Corridor",
+      "type": "restricted",
+      "shape": "rectangle",
+      "points": [
+        {
+          "x": 5.0,
+          "y": 10.0
+        },
+        {
+          "x": 30.0,
+          "y": 10.0
+        },
+        {
+          "x": 30.0,
+          "y": 40.0
+        },
+        {
+          "x": 5.0,
+          "y": 40.0
+        }
+      ],
+      "alertLevel": "high",
+      "stayThresholdSeconds": 5.0,
+      "monitoredObjects": [
+        "person",
+        "unknown"
+      ],
+      "alertActions": {
+        "visualAlert": true,
+        "audibleAlarm": true,
+        "eventLog": true,
+        "webhookNotification": false
+      },
+      "enabled": true,
+      "color": "#3B82F6",
+      "createdAt": "2026-10-01 10:00:00",
+      "description": "Turnstile queuing corridor. Enforces entry flow speed."
+    }
+  ]
+}
