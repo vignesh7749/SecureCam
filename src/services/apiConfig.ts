@@ -36,13 +36,47 @@ export function getWebSocketUrl(httpUrl: string): string {
 }
 
 /**
+ * Optional user-configured backend URL stored in localStorage for hybrid/local testing
+ * on the deployed Vercel static demo.
+ */
+export function getCustomBackendUrl(): string {
+  if (typeof window !== 'undefined') {
+    try {
+      const stored = localStorage.getItem('securecam_custom_backend_url');
+      if (stored) return stored.trim().replace(/\/+$/, '');
+    } catch {}
+  }
+  return '';
+}
+
+export function setCustomBackendUrl(url: string): void {
+  if (typeof window !== 'undefined') {
+    try {
+      const trimmed = (url || '').trim().replace(/\/+$/, '');
+      if (!trimmed) {
+        localStorage.removeItem('securecam_custom_backend_url');
+      } else {
+        localStorage.setItem('securecam_custom_backend_url', trimmed);
+      }
+    } catch {}
+  }
+  BACKEND_URL = resolveBackendUrl();
+  WS_BASE_URL = BACKEND_URL ? getWebSocketUrl(BACKEND_URL) : '';
+}
+
+/**
  * Resolves the backend base URL according to current environment:
- * 1. Explicit VITE_BACKEND_URL (required for production cloud deployments).
- * 2. Local development fallback (localhost:8000 or LAN hostname).
- * 3. In production with missing VITE_BACKEND_URL: returns empty string and logs an
- *    actionable error to prevent silent requests to localhost or port 8000.
+ * 1. User-configured custom backend URL (from localStorage).
+ * 2. Explicit VITE_BACKEND_URL (set in environment).
+ * 3. Local development fallback (localhost:8000 or LAN hostname).
+ * 4. Production deployment fallback: returns empty string (Demo Mode).
  */
 export function resolveBackendUrl(): string {
+  const custom = getCustomBackendUrl();
+  if (custom) {
+    return custom;
+  }
+
   if (rawEnvBackendUrl) {
     return rawEnvBackendUrl.replace(/\/+$/, '');
   }
@@ -62,18 +96,20 @@ export function resolveBackendUrl(): string {
   }
 
   // Production deployment with missing VITE_BACKEND_URL: Fall back to Demo Mode
-  if (typeof console !== 'undefined') {
-    console.info(
-      '[SecureCam] Running in Demo Mode: VITE_BACKEND_URL is not set. ' +
-      'Precomputed benchmark sessions and static sample videos are active. ' +
-      'To enable live AI inference and streaming, set VITE_BACKEND_URL to your backend API URL.'
-    );
-  }
   return '';
 }
 
-export const BACKEND_URL = resolveBackendUrl();
-export const WS_BASE_URL = BACKEND_URL ? getWebSocketUrl(BACKEND_URL) : '';
+export function getActiveBackendUrl(): string {
+  return resolveBackendUrl();
+}
+
+export function getActiveWebSocketUrl(): string {
+  const b = resolveBackendUrl();
+  return b ? getWebSocketUrl(b) : '';
+}
+
+export let BACKEND_URL = resolveBackendUrl();
+export let WS_BASE_URL = BACKEND_URL ? getWebSocketUrl(BACKEND_URL) : '';
 export const isBackendConfigured = Boolean(BACKEND_URL);
 
 /**

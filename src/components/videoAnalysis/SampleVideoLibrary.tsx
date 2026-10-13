@@ -17,6 +17,7 @@ export const SampleVideoLibrary: React.FC<SampleVideoLibraryProps> = ({ onSelect
     activeSampleVideo,
     selectSampleVideo,
     getVideoAnalysisStatus,
+    apiMode,
   } = useSurveillance();
 
   const handleSelect = (sample: SampleVideo) => {
@@ -31,7 +32,11 @@ export const SampleVideoLibrary: React.FC<SampleVideoLibraryProps> = ({ onSelect
         <div>
           <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Sample Videos</h3>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-            Discovered from server <code className="text-blue-600 dark:text-blue-400 font-mono">backend/samples/</code>
+            {apiMode === 'LIVE_AI' ? (
+              <>Discovered from server <code className="text-blue-600 dark:text-blue-400 font-mono">backend/samples/</code></>
+            ) : (
+              <>5 benchmark datasets with authentic YOLOv8 + ByteTrack replay</>
+            )}
           </p>
         </div>
 

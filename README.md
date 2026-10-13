@@ -17,10 +17,10 @@
 The frontend is deployed as a static web application on Vercel. Because the Python/PyTorch computer vision backend is not hosted on cloud infrastructure at this stage, the web application runs in an honest, transparent **Demo Mode**.
 
 ### 🌟 What Works in Demo Mode (Static Vercel Deployment)
-- **Authentic Precomputed Benchmark Replay:** Replays real, verified YOLOv8 + ByteTrack detections frame-by-frame on approved benchmark videos (`Testing_1.mp4`, `College_Testing_File.mp4`).
+- **Authentic Precomputed Benchmark Replay:** Replays real, verified YOLOv8 + ByteTrack detections frame-by-frame across all 5 benchmark videos (`Testing_1.mp4`, `College_Testing_File.mp4`, `Tester_1.mp4`, `Testing_2.mp4`, `Tester_2.mp4`).
 - **Zero Fake Detections:** The application never generates random synthetic boxes or claims in-browser inference. It displays raw video playback or authentic benchmark results.
 - **HTML5 Surveillance Video Player:** Play, pause, step frame, seek, scrub timeline, and adjust playback speed (0.5x, 1x, 2x).
-- **Interactive Emergency Zones Canvas:** Draw rectangular or polygonal security zones directly onto the video canvas and test dwell thresholds in-memory.
+- **Interactive Emergency Zones Canvas:** Draw rectangular or polygonal security zones directly onto the video canvas with automatic local browser persistence and test dwell thresholds in-memory.
 - **Trajectory Trails & Real-Time HUD:** Dynamic tracking IDs, velocity vectors, class tags, confidence scores, and bounding boxes.
 - **Auditable Security Alerts & Events:** Real-time alarm siren chime, event popovers, and severity categorization.
 - **Surveillance Reports & Metrics:** Target density charts, class breakdown, dwell analytics, and report export simulation.
@@ -33,7 +33,7 @@ The frontend is deployed as a static web application on Vercel. Because the Pyth
 - **Live YOLOv8 Inference:** Running live object detection models locally on CPU or CUDA GPU.
 - **Live ByteTrack Association:** Calculating Kalman filter tracking and bounding box association in real time.
 - **DINOv2 Novelty Analysis:** Extracting deep visual embeddings to detect unfamiliar or novel entities against a reference gallery.
-- **Persistent Zone Storage:** Saving custom security zones permanently to `backend/app/zones/zones_store.json`.
+- **Backend Zone Sync:** Synchronizing security zones permanently to `backend/app/zones/zones_store.json` (in Demo Mode, zones persist in browser localStorage).
 
 ---
 

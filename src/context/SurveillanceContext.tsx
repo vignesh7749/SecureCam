@@ -6,10 +6,7 @@ import { SampleVideo, VideoMetadata, VideoSource } from '../types/video';
 import { SystemSettings, SystemModelConfig } from '../types/system';
 import { 
   INITIAL_ZONES, 
-  INITIAL_TRACKED_OBJECTS, 
-  INITIAL_UNKNOWN_OBJECTS, 
   INITIAL_EVENTS, 
-  INITIAL_ZONE_VIOLATIONS, 
   DEFAULT_SYSTEM_SETTINGS, 
   DEFAULT_MODEL_CONFIG,
   STATIC_SAMPLE_VIDEOS
@@ -247,8 +244,32 @@ export const SurveillanceProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
   const [analysisStatus, setAnalysisStatus] = useState<'IDLE' | 'ANALYZING' | 'PAUSED' | 'COMPLETED'>('ANALYZING');
 
-  // Zones & Violations
-  const [zones, setZones] = useState<SecurityZone[]>(INITIAL_ZONES);
+  // Zones & Violations (with localStorage persistence for Demo Mode)
+  const [zones, setZones] = useState<SecurityZone[]>(() => {
+    try {
+      const saved = localStorage.getItem('securecam_demo_zones');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
+      }
+    } catch {
+      // Ignore localStorage read errors
+    }
+    return INITIAL_ZONES;
+  });
+
+  useEffect(() => {
+    if (apiMode === 'DEMO' || !BACKEND_URL) {
+      try {
+        localStorage.setItem('securecam_demo_zones', JSON.stringify(zones));
+      } catch {
+        // Ignore quota/storage errors
+      }
+    }
+  }, [zones, apiMode]);
+
   const [activeViolations, setActiveViolations] = useState<ZoneViolation[]>([]);
   const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null);
 
@@ -939,7 +960,7 @@ export const SurveillanceProvider: React.FC<{ children: React.ReactNode }> = ({ 
             });
           }
         }
-      } catch (err: any) {
+      } catch {
         if (isMounted) {
           setBackendHealth(null);
           if (apiMode === 'LIVE_AI') {
@@ -1671,6 +1692,12 @@ export const SurveillanceProvider: React.FC<{ children: React.ReactNode }> = ({ 
     if (cached) {
       return cached.status;
     }
+    if (apiModeRef.current === 'DEMO' || !BACKEND_URL) {
+      const isBundled = STATIC_SAMPLE_VIDEOS.some(v => v.id === videoId && v.storageType === 'bundled');
+      if (isBundled) {
+        return 'COMPLETED';
+      }
+    }
     return 'IDLE';
   }, [videoStatusMap]);
 
@@ -1845,6 +1872,7 @@ export const SurveillanceProvider: React.FC<{ children: React.ReactNode }> = ({ 
     acknowledgeEvent,
     acknowledgeAllEvents,
     clearAllEvents,
+    ingestLiveFeedResults,
     overlays,
     toggleOverlay,
     settings,

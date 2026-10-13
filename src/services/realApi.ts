@@ -13,8 +13,23 @@ import {
   STATIC_SAMPLE_VIDEOS
 } from './mockData';
 
-export { BACKEND_URL, WS_BASE_URL, getWebSocketUrl, SAMPLE_VIDEOS_STORAGE_URL } from './apiConfig';
-import { BACKEND_URL, WS_BASE_URL, SAMPLE_VIDEOS_STORAGE_URL, assertBackendConfigured } from './apiConfig';
+export { 
+  BACKEND_URL, 
+  WS_BASE_URL, 
+  getWebSocketUrl, 
+  SAMPLE_VIDEOS_STORAGE_URL,
+  getCustomBackendUrl,
+  setCustomBackendUrl,
+  getActiveBackendUrl,
+  getActiveWebSocketUrl
+} from './apiConfig';
+import { 
+  BACKEND_URL, 
+  WS_BASE_URL, 
+  SAMPLE_VIDEOS_STORAGE_URL, 
+  assertBackendConfigured,
+  getActiveBackendUrl 
+} from './apiConfig';
 
 export interface RealBackendHealth {
   status: string;
@@ -103,30 +118,56 @@ export class RealSurveillanceApi implements ISurveillanceApi {
   }
 
   async loadPrecomputedSession(videoId: string): Promise<any> {
-    let sessionPath = '';
     const lower = (videoId || '').toLowerCase();
-    if (lower.includes('testing_1') || lower.includes('testing 1')) {
-      sessionPath = '/samples/sample_testing_1_session.json';
-    } else if (lower.includes('college')) {
-      sessionPath = '/samples/sample_college_testing_file_session.json';
-    } else if (SAMPLE_VIDEOS_STORAGE_URL) {
-      if (lower.includes('tester_1') || lower.includes('tester 1')) {
-        sessionPath = `${SAMPLE_VIDEOS_STORAGE_URL}/sample_tester_1_session.json`;
-      } else if (lower.includes('testing_2') || lower.includes('testing 2')) {
-        sessionPath = `${SAMPLE_VIDEOS_STORAGE_URL}/sample_testing_2_session.json`;
-      } else if (lower.includes('tester_2') || lower.includes('tester 2')) {
-        sessionPath = `${SAMPLE_VIDEOS_STORAGE_URL}/sample_tester_2_session.json`;
-      }
-    }
-    if (!sessionPath) return null;
+    const candidatePaths: string[] = [];
 
-    try {
-      const res = await fetch(sessionPath);
-      if (res.ok) {
-        return await res.json();
+    if (lower.includes('testing_1') || lower.includes('testing 1')) {
+      candidatePaths.push('/samples/sample_testing_1_session.json');
+      if (SAMPLE_VIDEOS_STORAGE_URL) candidatePaths.push(`${SAMPLE_VIDEOS_STORAGE_URL}/sample_testing_1_session.json`);
+    } else if (lower.includes('college')) {
+      candidatePaths.push('/samples/sample_college_testing_file_session.json');
+      if (SAMPLE_VIDEOS_STORAGE_URL) candidatePaths.push(`${SAMPLE_VIDEOS_STORAGE_URL}/sample_college_testing_file_session.json`);
+    } else if (lower.includes('tester_1') || lower.includes('tester 1')) {
+      candidatePaths.push('/samples/sample_tester_1_session.json');
+      if (SAMPLE_VIDEOS_STORAGE_URL) candidatePaths.push(`${SAMPLE_VIDEOS_STORAGE_URL}/sample_tester_1_session.json`);
+    } else if (lower.includes('testing_2') || lower.includes('testing 2')) {
+      candidatePaths.push('/samples/sample_testing_2_session.json.gz');
+      candidatePaths.push('/samples/sample_testing_2_session.json');
+      if (SAMPLE_VIDEOS_STORAGE_URL) candidatePaths.push(`${SAMPLE_VIDEOS_STORAGE_URL}/sample_testing_2_session.json`);
+    } else if (lower.includes('tester_2') || lower.includes('tester 2')) {
+      candidatePaths.push('/samples/sample_tester_2_session.json.gz');
+      candidatePaths.push('/samples/sample_tester_2_session.json');
+      if (SAMPLE_VIDEOS_STORAGE_URL) candidatePaths.push(`${SAMPLE_VIDEOS_STORAGE_URL}/sample_tester_2_session.json`);
+    }
+
+    if (candidatePaths.length === 0) return null;
+
+    for (const sessionPath of candidatePaths) {
+      try {
+        const res = await fetch(sessionPath);
+        if (res.ok) {
+          if (sessionPath.endsWith('.gz')) {
+            const contentEncoding = res.headers.get('content-encoding');
+            if (contentEncoding === 'gzip') {
+              return await res.json();
+            }
+            if (typeof DecompressionStream !== 'undefined' && res.body) {
+              try {
+                const ds = new DecompressionStream('gzip');
+                const decompStream = res.body.pipeThrough(ds);
+                const decompressedResponse = new Response(decompStream);
+                return await decompressedResponse.json();
+              } catch (decompErr) {
+                console.warn(`[SecureCam] DecompressionStream error for ${sessionPath}, trying fallback:`, decompErr);
+                return await res.json();
+              }
+            }
+          }
+          return await res.json();
+        }
+      } catch (e) {
+        console.warn(`[SecureCam] Could not load precomputed session from ${sessionPath}:`, e);
       }
-    } catch (e) {
-      console.warn(`[SecureCam] Could not load precomputed session from ${sessionPath}:`, e);
     }
     return null;
   }

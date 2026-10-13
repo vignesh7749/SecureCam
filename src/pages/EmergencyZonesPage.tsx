@@ -83,7 +83,7 @@ export const EmergencyZonesPage: React.FC = () => {
         <div className="bg-amber-500/10 border border-amber-500/30 rounded p-3 text-xs text-amber-900 dark:text-amber-200 flex items-start gap-2">
           <Info className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
           <p>
-            In Demo Mode, emergency zones operate dynamically in-memory. You can draw zones and test intrusion/dwell rules against replaying benchmark tracks; changes are not persisted to a backend server.
+            In Demo Mode, emergency zones operate dynamically and persist in your browser's local storage. You can draw zones and test intrusion/dwell rules against replaying benchmark tracks.
           </p>
         </div>
       )}

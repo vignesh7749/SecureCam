@@ -1,8 +1,14 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useSurveillance } from '../context/SurveillanceContext';
-import { WS_BASE_URL, BACKEND_URL } from '../services/realApi';
+import { 
+  getCustomBackendUrl, 
+  setCustomBackendUrl, 
+  getActiveBackendUrl,
+  getWebSocketUrl
+} from '../services/realApi';
 import { TrackedObject } from '../types/detection';
-import { SecurityZone, ZoneViolation } from '../types/zone';
+import { ZoneViolation } from '../types/zone';
+import { ZoneEditorCanvas } from '../components/surveillance/ZoneEditorCanvas';
 import { Button } from '../components/common/Button';
 import { 
   Camera, 
@@ -14,19 +20,16 @@ import {
   Activity, 
   Maximize2, 
   Minimize2, 
-  Tv, 
-  Layers, 
-  Eye, 
-  EyeOff, 
   Sliders, 
   Smartphone, 
   Info, 
-  Wifi, 
-  WifiOff, 
-  Clock, 
-  Cpu, 
   Users, 
-  Target
+  Target,
+  X,
+  Check,
+  Square,
+  Eye,
+  Cpu
 } from 'lucide-react';
 
 interface LiveEventItem {
@@ -43,18 +46,34 @@ export const LiveCameraPage: React.FC = () => {
   const { 
     zones, 
     ingestLiveFeedResults,
-    backendHealth,
-    backendError,
+    isZoneEditMode,
+    setIsZoneEditMode,
+    drawingShape,
+    setDrawingShape,
+    draftPoints,
+    setDraftPoints,
+    finishDraftZone,
+    cancelDraftZone
   } = useSurveillance();
 
   // Media & Device State
   const [isStreaming, setIsStreaming] = useState<boolean>(false);
-  const [connectionStatus, setConnectionStatus] = useState<'disconnected' | 'connecting' | 'connected' | 'error'>('disconnected');
   const [permissionState, setPermissionState] = useState<'idle' | 'requesting' | 'granted' | 'denied' | 'insecure_context' | 'unavailable'>('idle');
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [cameraErrorMessage, setCameraErrorMessage] = useState<string | null>(null);
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('environment');
   const [availableDevices, setAvailableDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string>('');
+
+  // Dual-Mode Backend Connection State
+  const [backendStatus, setBackendStatus] = useState<'connected' | 'connecting' | 'disconnected' | 'error'>('disconnected');
+  const [backendUrlInput, setBackendUrlInput] = useState<string>(() => {
+    return getCustomBackendUrl() || getActiveBackendUrl() || 'http://localhost:8000';
+  });
+  const [activeConnectedUrl, setActiveConnectedUrl] = useState<string>(() => getActiveBackendUrl());
+  const [backendErrorDetails, setBackendErrorDetails] = useState<string | null>(null);
+  const [showBackendModal, setShowBackendModal] = useState<boolean>(false);
+  const [isTestingConnection, setIsTestingConnection] = useState<boolean>(false);
+  const [backendModelInfo, setBackendModelInfo] = useState<{ loaded: boolean; modelName: string; device: string } | null>(null);
 
   // Live Telemetry from Real AI Pipeline
   const [liveTracks, setLiveTracks] = useState<TrackedObject[]>([]);
@@ -65,7 +84,6 @@ export const LiveCameraPage: React.FC = () => {
   const [pipelineFps, setPipelineFps] = useState<number>(0);
   const [totalLatencyMs, setTotalLatencyMs] = useState<number>(0);
   const [detectionLatencyMs, setDetectionLatencyMs] = useState<number>(0);
-  const [frameIndex, setFrameIndex] = useState<number>(0);
   const [liveEvents, setLiveEvents] = useState<LiveEventItem[]>([]);
 
   // HUD & Display Options
@@ -89,7 +107,7 @@ export const LiveCameraPage: React.FC = () => {
   // Dimension tracking for 1:1 overlay alignment
   const [renderedDimensions, setRenderedDimensions] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
 
-  // Responsive video dimension calculation (prevents bounding box misalignment)
+  // Responsive video dimension calculation (prevents overlay misalignment)
   const updateDimensions = useCallback(() => {
     const vp = viewportRef.current;
     if (!vp) return;
@@ -170,7 +188,7 @@ export const LiveCameraPage: React.FC = () => {
       const videoInputs = allDevices.filter(d => d.kind === 'videoinput');
       setAvailableDevices(videoInputs);
     } catch (e) {
-      console.warn('Could not enumerate media devices:', e);
+      console.warn('[SecureCam] Could not enumerate media devices:', e);
     }
   }, []);
 
@@ -203,11 +221,13 @@ export const LiveCameraPage: React.FC = () => {
     }
 
     setIsStreaming(false);
-    setConnectionStatus('disconnected');
     setLiveTracks([]);
     setRawDetectionsCount(0);
     setActiveTracksCount(0);
     setActiveViolations([]);
+    setPipelineFps(0);
+    setTotalLatencyMs(0);
+    setDetectionLatencyMs(0);
   }, []);
 
   // Frame Capture and Lockstep Transmission Loop
@@ -219,14 +239,12 @@ export const LiveCameraPage: React.FC = () => {
       const ws = wsRef.current;
       const canvas = canvasRef.current;
 
-      // Lockstep backpressure guard: wait until previous frame response is processed
       const isSocketReady = ws && ws.readyState === WebSocket.OPEN;
       const isVideoReady = video && video.readyState >= 2 && video.videoWidth > 0 && !video.paused;
       const now = performance.now();
       const throttleElapsed = now - lastSendTimeRef.current >= 110; // ~9 FPS max target
 
       if (isSocketReady && isVideoReady && canvas && !inFlightRef.current && throttleElapsed) {
-        // Match capture resolution: 640x360 or proportional
         const vW = video.videoWidth;
         const vH = video.videoHeight;
         const targetW = 640;
@@ -268,38 +286,37 @@ export const LiveCameraPage: React.FC = () => {
   }, [isStreaming]);
 
   // Connect WebSocket to Live Feed Endpoint
-  const connectWebSocket = useCallback(() => {
+  const connectWebSocket = useCallback((targetUrl?: string) => {
     if (wsRef.current) {
       try {
         wsRef.current.close();
       } catch {}
+      wsRef.current = null;
     }
 
-    if (!WS_BASE_URL) {
-      setConnectionStatus('error');
-      setErrorMessage(
-        'Live Camera streaming and real-time AI processing require the local FastAPI backend. In Demo Mode, live webcam inference is unavailable. To run live camera AI inference, start the backend locally: python -m uvicorn app.main:app --port 8000 (see README).'
-      );
+    const effectiveBackendUrl = targetUrl || getActiveBackendUrl();
+    if (!effectiveBackendUrl) {
+      setBackendStatus('disconnected');
       return;
     }
 
-    setConnectionStatus('connecting');
-    const wsUrl = `${WS_BASE_URL}/ws/live-feed`;
-    let ws: WebSocket;
+    const wsUrl = `${getWebSocketUrl(effectiveBackendUrl)}/ws/live-feed`;
+    setBackendStatus('connecting');
 
+    let ws: WebSocket;
     try {
       ws = new WebSocket(wsUrl);
       ws.binaryType = 'arraybuffer';
     } catch (e: any) {
-      console.error('Failed to create WebSocket:', e);
-      setConnectionStatus('error');
-      setErrorMessage(`Could not establish WebSocket connection to ${wsUrl}. Check if backend is running.`);
+      console.warn('[SecureCam] WebSocket creation error:', e);
+      setBackendStatus('error');
+      setBackendErrorDetails(`Could not establish WebSocket connection to ${wsUrl}.`);
       return;
     }
 
     ws.onopen = () => {
-      setConnectionStatus('connected');
-      setErrorMessage(null);
+      setBackendStatus('connected');
+      setBackendErrorDetails(null);
       inFlightRef.current = false;
     };
 
@@ -308,10 +325,8 @@ export const LiveCameraPage: React.FC = () => {
         const data = JSON.parse(event.data);
 
         if (data.type === 'live_tracks') {
-          // Release backpressure flag
           inFlightRef.current = false;
 
-          // Update live AI telemetry
           setLiveTracks(data.tracks || []);
           setRawDetectionsCount(data.rawDetectionsCount ?? (data.tracks?.length || 0));
           setActiveTracksCount(data.activeTracksCount ?? (data.tracks?.length || 0));
@@ -320,9 +335,7 @@ export const LiveCameraPage: React.FC = () => {
           setPipelineFps(data.pipelineFps || 0);
           setTotalLatencyMs(data.totalLatencyMs || 0);
           setDetectionLatencyMs(data.detectionLatencyMs || 0);
-          setFrameIndex(data.frameIndex || 0);
 
-          // Ingest events into local live event log
           if (data.zoneEvents && data.zoneEvents.length > 0) {
             setLiveEvents(prev => {
               const newItems: LiveEventItem[] = data.zoneEvents.map((ev: any) => ({
@@ -338,7 +351,6 @@ export const LiveCameraPage: React.FC = () => {
             });
           }
 
-          // Forward to global SurveillanceContext for alarm chime & notification popups
           ingestLiveFeedResults({
             activeViolations: data.activeViolations,
             zoneEvents: data.zoneEvents,
@@ -346,39 +358,72 @@ export const LiveCameraPage: React.FC = () => {
           });
         } else if (data.type === 'frame_error') {
           inFlightRef.current = false;
-          console.warn('Backend frame processing error:', data.error);
+          console.warn('[SecureCam] Backend frame error:', data.error);
         } else if (data.type === 'live_connected') {
           inFlightRef.current = false;
         }
       } catch (err) {
         inFlightRef.current = false;
-        console.warn('Error parsing live feed response:', err);
+        console.warn('[SecureCam] Error parsing live feed response:', err);
       }
     };
 
     ws.onerror = (e) => {
-      console.warn('Live feed WebSocket error:', e);
-      setConnectionStatus('error');
+      console.warn('[SecureCam] Live feed WebSocket connection failed:', e);
+      setBackendStatus('error');
+      setBackendErrorDetails(`WebSocket connection to ${wsUrl} failed or was closed by server.`);
       inFlightRef.current = false;
     };
 
     ws.onclose = () => {
-      setConnectionStatus('disconnected');
+      setBackendStatus('disconnected');
       inFlightRef.current = false;
     };
 
     wsRef.current = ws;
   }, [ingestLiveFeedResults]);
 
+  // Probe Backend Connectivity on Mount or when URL changes
+  useEffect(() => {
+    const activeUrl = getActiveBackendUrl();
+    if (!activeUrl) return;
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 2500);
+
+    fetch(`${activeUrl}/api/v1/health`, { signal: controller.signal })
+      .then(res => {
+        clearTimeout(timer);
+        if (res.ok) return res.json();
+        throw new Error(`HTTP ${res.status}`);
+      })
+      .then(data => {
+        setBackendStatus('connected');
+        setBackendModelInfo({
+          loaded: data.model?.loaded ?? true,
+          modelName: data.model?.model_name || 'YOLOv8',
+          device: data.device?.device_type || 'CPU',
+        });
+      })
+      .catch(() => {
+        setBackendStatus('disconnected');
+      });
+
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, []);
+
   // Request User Media and Start Stream
   const startStream = useCallback(async () => {
-    setErrorMessage(null);
+    setCameraErrorMessage(null);
     setPermissionState('requesting');
 
-    // Secure context pre-check (crucial for mobile cross-device)
+    // Secure context pre-check (protects mobile LAN access)
     if (typeof window !== 'undefined' && !window.isSecureContext && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
       setPermissionState('insecure_context');
-      setErrorMessage(
+      setCameraErrorMessage(
         'Camera access requires a Secure Context (HTTPS or localhost). Modern mobile browsers block camera access over plain HTTP when connected via LAN IP. Please run with HTTPS or test on localhost.'
       );
       return;
@@ -386,7 +431,7 @@ export const LiveCameraPage: React.FC = () => {
 
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       setPermissionState('unavailable');
-      setErrorMessage('MediaDevices API is not supported on this browser or platform.');
+      setCameraErrorMessage('MediaDevices API is not supported on this browser or platform.');
       return;
     }
 
@@ -406,7 +451,6 @@ export const LiveCameraPage: React.FC = () => {
       try {
         stream = await navigator.mediaDevices.getUserMedia(constraints);
       } catch (err: any) {
-        // Fallback to basic video constraint if ideal constraints failed
         if (err.name === 'OverconstrainedError' || err.name === 'ConstraintNotSatisfiedError') {
           stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
         } else {
@@ -423,33 +467,39 @@ export const LiveCameraPage: React.FC = () => {
         try {
           await videoRef.current.play();
         } catch (playErr) {
-          console.warn('AutoPlay note:', playErr);
+          console.warn('[SecureCam] AutoPlay note:', playErr);
         }
       }
 
-      // Connect WebSocket & refresh camera hardware device list
-      connectWebSocket();
       await refreshDevices();
+
+      // If a backend URL is configured, connect WebSocket; otherwise stay peacefully in Demo Mode
+      const activeUrl = getActiveBackendUrl();
+      if (activeUrl) {
+        connectWebSocket(activeUrl);
+      } else {
+        setBackendStatus('disconnected');
+      }
     } catch (err: any) {
-      console.error('Camera access failed:', err);
+      console.warn('[SecureCam] Camera access notice:', err);
       if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
         setPermissionState('denied');
-        setErrorMessage('Camera access was denied. Please allow camera permissions in your browser address bar.');
+        setCameraErrorMessage('Camera access was denied. Please allow camera permissions in your browser address bar.');
       } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
         setPermissionState('unavailable');
-        setErrorMessage('No camera hardware detected on this device.');
+        setCameraErrorMessage('No camera hardware detected on this device.');
       } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
         setPermissionState('unavailable');
-        setErrorMessage('Camera hardware is currently in use by another application.');
+        setCameraErrorMessage('Camera hardware is currently in use by another application.');
       } else {
         setPermissionState('unavailable');
-        setErrorMessage(`Camera error: ${err.message || 'Unknown media error'}`);
+        setCameraErrorMessage(`Camera error: ${err.message || 'Unknown media error'}`);
       }
       setIsStreaming(false);
     }
   }, [facingMode, selectedDeviceId, connectWebSocket, refreshDevices]);
 
-  // Flip camera between Front and Rear (User and Environment)
+  // Flip camera between Front and Rear
   const toggleFacingMode = useCallback(async () => {
     const nextMode = facingMode === 'environment' ? 'user' : 'environment';
     setFacingMode(nextMode);
@@ -457,13 +507,12 @@ export const LiveCameraPage: React.FC = () => {
     if (isStreaming) {
       stopStream();
       setTimeout(() => {
-        // Restart with opposite facing mode
         setFacingMode(nextMode);
       }, 50);
     }
   }, [facingMode, isStreaming, stopStream]);
 
-  // Handle device change from select dropdown
+  // Handle device change
   const handleDeviceChange = (deviceId: string) => {
     setSelectedDeviceId(deviceId);
     if (isStreaming) {
@@ -473,7 +522,7 @@ export const LiveCameraPage: React.FC = () => {
 
   // Launch frame loop when streaming begins
   useEffect(() => {
-    if (isStreaming) {
+    if (isStreaming && backendStatus === 'connected') {
       startFrameLoop();
     } else {
       if (frameLoopTimerRef.current !== null) {
@@ -488,9 +537,9 @@ export const LiveCameraPage: React.FC = () => {
         frameLoopTimerRef.current = null;
       }
     };
-  }, [isStreaming, startFrameLoop]);
+  }, [isStreaming, backendStatus, startFrameLoop]);
 
-  // Cleanup on component unmount
+  // Cleanup on unmount
   useEffect(() => {
     return () => {
       stopStream();
@@ -525,9 +574,80 @@ export const LiveCameraPage: React.FC = () => {
         setIsFullscreen(false);
       }
     } catch (err) {
-      console.warn('Fullscreen toggle:', err);
+      console.warn('[SecureCam] Fullscreen toggle:', err);
     }
   }, []);
+
+  // Handle Testing & Connecting to Backend URL
+  const handleTestAndConnect = async () => {
+    const target = (backendUrlInput || '').trim().replace(/\/+$/, '');
+    if (!target) {
+      setBackendErrorDetails('Please provide a valid backend URL (e.g. http://localhost:8000).');
+      return;
+    }
+
+    setIsTestingConnection(true);
+    setBackendErrorDetails(null);
+
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 3500);
+
+      const res = await fetch(`${target}/api/v1/health`, { signal: controller.signal });
+      clearTimeout(timeout);
+
+      if (!res.ok) {
+        throw new Error(`Server returned HTTP ${res.status}`);
+      }
+
+      const data = await res.json();
+      setBackendModelInfo({
+        loaded: data.model?.loaded ?? true,
+        modelName: data.model?.model_name || 'YOLOv8',
+        device: data.device?.device_type || 'CPU',
+      });
+
+      // Save custom backend URL
+      setCustomBackendUrl(target);
+      setActiveConnectedUrl(target);
+      setBackendStatus('connected');
+      setShowBackendModal(false);
+
+      // Reconnect WebSocket if camera is currently streaming
+      if (isStreaming) {
+        connectWebSocket(target);
+      }
+    } catch (err: any) {
+      setBackendStatus('error');
+      if (err.name === 'AbortError') {
+        setBackendErrorDetails(`Connection timed out after 3.5s connecting to ${target}/api/v1/health.`);
+      } else {
+        setBackendErrorDetails(
+          `Could not connect to ${target}. Ensure the FastAPI server is running with CORS enabled (e.g. python run_backend.py).`
+        );
+      }
+    } finally {
+      setIsTestingConnection(false);
+    }
+  };
+
+  const handleDisconnectBackend = () => {
+    if (wsRef.current) {
+      try {
+        wsRef.current.close();
+      } catch {}
+      wsRef.current = null;
+    }
+    setCustomBackendUrl('');
+    setActiveConnectedUrl('');
+    setBackendStatus('disconnected');
+    setBackendModelInfo(null);
+    setLiveTracks([]);
+    setRawDetectionsCount(0);
+    setActiveTracksCount(0);
+    setPipelineFps(0);
+    setShowBackendModal(false);
+  };
 
   const activeZones = zones.filter(z => z.enabled);
 
@@ -542,38 +662,67 @@ export const LiveCameraPage: React.FC = () => {
           <div className="flex items-center gap-2">
             <h1 className="text-xl font-bold text-slate-900 dark:text-white tracking-tight">Live Camera Feed</h1>
             <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
-              YOLOv8 + ByteTrack + Zones
+              Edge Streaming & Zones
             </span>
           </div>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-            Real-time edge camera streaming with persistent identity tracking, DINOv2 novelty evaluation, and Emergency Zone intrusion monitoring.
+            Real-time edge camera streaming with interactive Emergency Zone perimeters and optional local YOLOv8 AI inference.
           </p>
         </div>
 
-        {/* Live Indicator Badge */}
-        <div className="flex items-center gap-2">
+        {/* Dual-Mode Badges: Separate Camera & Backend Status */}
+        <div className="flex flex-wrap items-center gap-2">
+          {/* 1. Camera Hardware Badge */}
           {isStreaming ? (
-            <div className="flex items-center gap-2 px-3 py-1 rounded bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/80 text-emerald-700 dark:text-emerald-300 text-xs font-semibold">
+            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-emerald-500/10 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 text-xs font-semibold">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              <span>LIVE ({pipelineFps.toFixed(1)} FPS)</span>
-              <span className="text-[10px] text-emerald-600/70 dark:text-emerald-400/70 border-l border-emerald-300 dark:border-emerald-800/80 pl-1.5 ml-0.5 font-mono">
-                {totalLatencyMs > 0 ? `${Math.round(totalLatencyMs)}ms` : 'Lockstep'}
+              <span>CAMERA ACTIVE</span>
+              <span className="text-[10px] text-emerald-600/70 dark:text-emerald-400/70 border-l border-emerald-500/30 pl-1.5 font-mono">
+                {facingMode === 'environment' ? 'Rear' : 'Front'}
               </span>
             </div>
           ) : (
-            <div className="flex items-center gap-1.5 px-3 py-1 rounded bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 text-xs font-medium">
+            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 text-xs font-medium">
               <span className="w-2 h-2 rounded-full bg-slate-400" />
-              <span>OFFLINE / STANDBY</span>
+              <span>CAMERA STANDBY</span>
             </div>
           )}
 
+          {/* 2. AI Backend Connection Badge */}
+          {backendStatus === 'connected' ? (
+            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-blue-500/10 border border-blue-500/30 text-blue-700 dark:text-blue-300 text-xs font-semibold">
+              <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+              <span>AI CONNECTED ({pipelineFps > 0 ? `${pipelineFps.toFixed(1)} FPS` : 'Ready'})</span>
+            </div>
+          ) : backendStatus === 'connecting' ? (
+            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-300 text-xs font-semibold">
+              <RefreshCw className="w-3 h-3 animate-spin text-amber-500" />
+              <span>CONNECTING AI...</span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-amber-500/10 border border-amber-500/30 text-amber-800 dark:text-amber-300 text-xs font-medium">
+              <span className="w-2 h-2 rounded-full bg-amber-500" />
+              <span>AI OFFLINE (DEMO MODE)</span>
+            </div>
+          )}
+
+          {/* Backend Connection Modal Button */}
+          <button
+            onClick={() => setShowBackendModal(true)}
+            className="px-2.5 py-1 rounded text-xs border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-1.5 transition-colors cursor-pointer"
+            title="Configure Local Backend URL"
+          >
+            <Sliders className="w-3.5 h-3.5 text-blue-500" />
+            <span>Backend Settings</span>
+          </button>
+
+          {/* Mobile & Setup Guide Button */}
           <button
             onClick={() => setShowMobileGuide(!showMobileGuide)}
-            className="px-2.5 py-1 rounded text-xs border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-1 transition-colors"
-            title="Cross-Device Instructions"
+            className="p-1 rounded text-xs border border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+            title="Cross-Device Guide"
           >
-            <Smartphone className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Mobile & Setup</span>
+            <Smartphone className="w-4 h-4" />
           </button>
         </div>
       </div>
@@ -588,42 +737,29 @@ export const LiveCameraPage: React.FC = () => {
             </span>
             <button 
               onClick={() => setShowMobileGuide(false)}
-              className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-sm font-bold"
+              className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-sm font-bold cursor-pointer"
             >
               ✕
             </button>
           </div>
           <p className="leading-relaxed">
-            SecureCam streams real camera video using HTML5 <code className="bg-blue-100 dark:bg-blue-900/60 px-1 rounded">getUserMedia</code> directly to the FastAPI computer vision backend over low-latency binary WebSockets.
+            SecureCam captures real hardware camera video directly inside your browser. You can test Emergency Zone perimeters locally, or connect your local Python backend for live YOLOv8 multi-object tracking.
           </p>
           <ul className="list-disc pl-5 space-y-1 text-slate-600 dark:text-slate-400">
-            <li><strong>Laptops & Desktops:</strong> Supports built-in webcams and USB external security cameras.</li>
-            <li><strong>Mobile Phones (Chrome / Safari):</strong> Tap <em>Start Camera</em> and allow permission when prompted. Use the <em>Flip Camera</em> button to switch between Front and Rear lens.</li>
-            <li><strong>Remote Wi-Fi Access:</strong> In modern browsers, camera access on non-localhost IPs requires HTTPS or localhost. If opening from a mobile phone on LAN (e.g. <code>http://192.168.x.x:5173</code>), configure HTTPS or use port forwarding/tunneling.</li>
+            <li><strong>Laptops & Desktops:</strong> Supports built-in webcams and USB external video capture cards.</li>
+            <li><strong>Mobile Devices (Chrome / Safari):</strong> Tap <em>Start Camera</em> and grant permission. Use <em>Flip Camera</em> to switch between Front and Rear lens.</li>
+            <li><strong>Local AI Connection:</strong> Start <code className="bg-blue-100 dark:bg-blue-900/60 px-1 py-0.5 rounded font-mono">python run_backend.py</code> on your computer, then click <em>Backend Settings</em> to connect.</li>
           </ul>
         </div>
       )}
 
-      {/* Demo Mode Notice: Clear and honest explanation */}
-      {(!BACKEND_URL || !backendHealth) && (
-        <div className="bg-amber-500/10 border border-amber-500/30 rounded p-3 text-xs text-amber-900 dark:text-amber-200 flex items-start gap-2.5">
-          <Info className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
-          <div className="space-y-1">
-            <span className="font-semibold">Local Backend Required for Live Camera AI</span>
-            <p>
-              Live Camera streaming and real-time AI processing require the local FastAPI backend. In Demo Mode, live webcam inference is unavailable. To run live camera AI inference, start the backend locally: <code className="bg-amber-500/20 px-1 py-0.5 rounded font-mono text-[11px]">python -m uvicorn app.main:app --port 8000</code> (see README).
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* Insecure Context or Error Alert Banner */}
-      {errorMessage && (
+      {/* Camera Permission or Insecure Context Error Alert Banner */}
+      {cameraErrorMessage && (
         <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/60 rounded p-3 text-xs text-red-700 dark:text-red-300 flex items-start gap-2.5">
           <AlertTriangle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
           <div className="space-y-1">
-            <span className="font-semibold">Camera Streaming Notice:</span>
-            <p>{errorMessage}</p>
+            <span className="font-semibold">Camera Access Notice:</span>
+            <p>{cameraErrorMessage}</p>
           </div>
         </div>
       )}
@@ -661,7 +797,7 @@ export const LiveCameraPage: React.FC = () => {
               />
 
               {/* HUD Layer 1: Emergency Zones Overlay */}
-              {showZones && (
+              {showZones && !isZoneEditMode && (
                 <div className="absolute inset-0 pointer-events-none z-10">
                   <svg className="w-full h-full absolute inset-0">
                     <defs>
@@ -674,7 +810,7 @@ export const LiveCameraPage: React.FC = () => {
                     </defs>
 
                     {activeZones.map(zone => {
-                      const isViolation = activeViolations.some(v => v.zoneId === zone.id && v.status === 'ACTIVE');
+                      const isViolation = backendStatus === 'connected' && activeViolations.some(v => v.zoneId === zone.id && v.status === 'ACTIVE');
                       const strokeColor = isViolation ? '#EF4444' : (zone.type === 'emergency' ? '#EF4444' : '#F59E0B');
                       const fillColor = isViolation ? 'rgba(239, 68, 68, 0.25)' : (zone.type === 'emergency' ? 'rgba(239, 68, 68, 0.08)' : 'rgba(245, 158, 11, 0.06)');
 
@@ -700,7 +836,6 @@ export const LiveCameraPage: React.FC = () => {
                             strokeWidth="2"
                             strokeDasharray={isViolation ? 'none' : '4 3'}
                           />
-                          {/* Zone Name Label */}
                           {zone.points.length > 0 && (
                             <text
                               x={`${zone.points[0].x + 1}%`}
@@ -711,7 +846,7 @@ export const LiveCameraPage: React.FC = () => {
                               fontFamily="monospace"
                               className="select-none filter drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]"
                             >
-                              {zone.name.toUpperCase()} {isViolation ? '[VIOLATION]' : ''}
+                              {zone.name.toUpperCase()} {isViolation ? '[VIOLATION]' : (backendStatus !== 'connected' ? '[GEOMETRY]' : '')}
                             </text>
                           )}
                         </g>
@@ -721,8 +856,27 @@ export const LiveCameraPage: React.FC = () => {
                 </div>
               )}
 
-              {/* HUD Layer 2: Bounding Boxes & Persistent Track IDs */}
-              {showBoundingBoxes && (
+              {/* HUD Layer 2: Interactive Zone Drawing Canvas */}
+              {isZoneEditMode && (
+                <div className="absolute inset-0 z-40 pointer-events-auto">
+                  <ZoneEditorCanvas
+                    isDrawing={isZoneEditMode}
+                    drawingShape={drawingShape}
+                    setDrawingShape={setDrawingShape}
+                    draftPoints={draftPoints}
+                    setDraftPoints={setDraftPoints}
+                    onFinishZone={(name, type, threshold) => {
+                      finishDraftZone(name, type, threshold);
+                    }}
+                    onCancel={() => {
+                      cancelDraftZone();
+                    }}
+                  />
+                </div>
+              )}
+
+              {/* HUD Layer 3: Genuine YOLOv8 Detections & ByteTrack IDs (Active only with backend) */}
+              {showBoundingBoxes && backendStatus === 'connected' && (
                 <div className="absolute inset-0 pointer-events-none z-20">
                   {liveTracks.map(track => {
                     const trackIdNum = track.trackId ?? track.trackingId;
@@ -774,17 +928,32 @@ export const LiveCameraPage: React.FC = () => {
                 </div>
               )}
 
-              {/* HUD Corner Watermark */}
+              {/* HUD Corner Watermarks */}
               <div className="absolute top-3 left-3 z-30 pointer-events-none flex items-center gap-2">
-                <span className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-black/60 backdrop-blur-sm border border-white/10 text-white text-[11px] font-mono">
+                <span className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-black/70 backdrop-blur-sm border border-white/10 text-white text-[11px] font-mono">
                   <span className="w-2 h-2 rounded-full bg-red-500 animate-ping" />
-                  <span className="font-bold text-red-400">LIVE</span>
+                  <span className="font-bold text-red-400">CAMERA ACTIVE</span>
                   <span className="text-white/60">|</span>
-                  <span>{facingMode === 'environment' ? 'Rear Cam' : 'Front Cam'}</span>
+                  <span>{facingMode === 'environment' ? 'Rear Lens' : 'Front Lens'}</span>
                 </span>
-                {pipelineFps > 0 && (
-                  <span className="px-1.5 py-0.5 rounded bg-black/60 backdrop-blur-sm border border-white/10 text-emerald-400 text-[10px] font-mono">
+                {backendStatus === 'connected' && pipelineFps > 0 && (
+                  <span className="px-1.5 py-0.5 rounded bg-black/70 backdrop-blur-sm border border-white/10 text-emerald-400 text-[10px] font-mono">
                     {pipelineFps.toFixed(1)} FPS
+                  </span>
+                )}
+              </div>
+
+              {/* HUD Center Mode Pill */}
+              <div className="absolute top-3 right-3 z-30 pointer-events-none">
+                {backendStatus === 'connected' ? (
+                  <span className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-blue-950/80 backdrop-blur-sm border border-blue-500/50 text-blue-300 text-[10px] font-bold">
+                    <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
+                    [LIVE AI: YOLOv8 + ByteTrack]
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-amber-950/80 backdrop-blur-sm border border-amber-500/50 text-amber-300 text-[10px] font-bold">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                    [CAMERA ACTIVE • AI BACKEND OFFLINE (DEMO MODE)]
                   </span>
                 )}
               </div>
@@ -799,8 +968,26 @@ export const LiveCameraPage: React.FC = () => {
               <div>
                 <h3 className="text-base font-semibold text-white tracking-tight">Camera Feed Standby</h3>
                 <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                  Connect your device's built-in webcam, external security camera, or mobile phone to run live edge AI surveillance.
+                  Start your device's camera to monitor the live feed, test interactive Emergency Zones, or connect to your local YOLOv8 AI pipeline.
                 </p>
+                {permissionState === 'requesting' && (
+                  <div className="mt-2.5 text-xs text-amber-400 flex items-center justify-center gap-1.5 animate-pulse">
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Prompting for camera permission in browser...</span>
+                  </div>
+                )}
+                {permissionState === 'denied' && (
+                  <div className="mt-2.5 text-xs text-red-400 flex items-center justify-center gap-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5" />
+                    <span>Camera permission was denied. Please allow camera access in your browser settings.</span>
+                  </div>
+                )}
+                {permissionState === 'insecure_context' && (
+                  <div className="mt-2.5 text-xs text-amber-400 flex items-center justify-center gap-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5" />
+                    <span>Insecure Context: HTTPS or localhost required for camera access.</span>
+                  </div>
+                )}
               </div>
 
               <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-2.5">
@@ -809,7 +996,7 @@ export const LiveCameraPage: React.FC = () => {
                   size="md"
                   onClick={startStream}
                   icon={<Camera className="w-4 h-4" />}
-                  className="w-full sm:w-auto font-semibold px-5"
+                  className="w-full sm:w-auto font-semibold px-5 cursor-pointer"
                 >
                   Start Live Camera
                 </Button>
@@ -820,7 +1007,7 @@ export const LiveCameraPage: React.FC = () => {
                     size="md"
                     onClick={toggleFacingMode}
                     icon={<RefreshCw className="w-3.5 h-3.5" />}
-                    className="w-full sm:w-auto text-xs"
+                    className="w-full sm:w-auto text-xs cursor-pointer"
                   >
                     Flip Camera
                   </Button>
@@ -828,16 +1015,25 @@ export const LiveCameraPage: React.FC = () => {
               </div>
 
               <div className="text-[11px] text-slate-400 border-t border-slate-800 pt-3 flex items-center justify-center gap-1.5">
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-                <span>Backend status: {backendHealth ? 'Connected (PyTorch / YOLOv8)' : 'Connecting...'}</span>
+                {backendStatus === 'connected' ? (
+                  <>
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+                    <span>AI Backend Connected ({backendModelInfo?.modelName || 'YOLOv8'} on {backendModelInfo?.device || 'CPU'})</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="w-2 h-2 rounded-full bg-amber-500" />
+                    <span>Demo Mode (Camera-only streaming. Connect local backend for live inference.)</span>
+                  </>
+                )}
               </div>
             </div>
           )}
         </div>
 
-        {/* Floating Player Control Bar */}
+        {/* Floating Tactical Control Bar */}
         <div className="w-full bg-slate-900/90 backdrop-blur-md border-t border-white/10 px-3 py-2 flex flex-wrap items-center justify-between gap-2 z-30 text-white text-xs">
-          {/* Left Action Controls */}
+          {/* Left Controls: Start/Stop & Camera Flip */}
           <div className="flex items-center gap-1.5 sm:gap-2">
             {isStreaming ? (
               <Button
@@ -845,6 +1041,7 @@ export const LiveCameraPage: React.FC = () => {
                 size="sm"
                 onClick={stopStream}
                 icon={<CameraOff className="w-3.5 h-3.5" />}
+                className="cursor-pointer"
               >
                 Stop Camera
               </Button>
@@ -854,12 +1051,12 @@ export const LiveCameraPage: React.FC = () => {
                 size="sm"
                 onClick={startStream}
                 icon={<Camera className="w-3.5 h-3.5" />}
+                className="cursor-pointer"
               >
                 Start Camera
               </Button>
             )}
 
-            {/* Flip Camera Button (Front / Rear) */}
             <button
               onClick={toggleFacingMode}
               disabled={!isStreaming}
@@ -874,7 +1071,6 @@ export const LiveCameraPage: React.FC = () => {
               <span className="hidden sm:inline">Flip</span>
             </button>
 
-            {/* Camera Select Dropdown (if multiple devices) */}
             {availableDevices.length > 1 && (
               <select
                 value={selectedDeviceId}
@@ -891,50 +1087,81 @@ export const LiveCameraPage: React.FC = () => {
             )}
           </div>
 
-          {/* Center HUD Toggles */}
+          {/* Center HUD & Zone Sandbox Controls */}
           <div className="flex items-center gap-1 sm:gap-2">
             <button
-              onClick={() => setShowBoundingBoxes(!showBoundingBoxes)}
-              className={`px-2 py-1 rounded border text-[11px] transition-colors flex items-center gap-1 ${
-                showBoundingBoxes 
-                  ? 'bg-blue-600/30 border-blue-500/50 text-blue-300' 
-                  : 'border-white/10 text-slate-400 hover:bg-white/5'
+              onClick={() => {
+                if (isZoneEditMode) {
+                  cancelDraftZone();
+                } else {
+                  setIsZoneEditMode(true);
+                }
+              }}
+              className={`px-2.5 py-1 rounded border text-[11px] transition-colors flex items-center gap-1 cursor-pointer ${
+                isZoneEditMode
+                  ? 'bg-red-600/40 border-red-500 text-red-200 font-bold'
+                  : 'bg-emerald-600/20 border-emerald-500/40 text-emerald-300 hover:bg-emerald-600/30'
               }`}
-              title="Toggle Bounding Boxes"
+              title="Draw new Emergency Zone directly over camera stream"
             >
-              <Target className="w-3 h-3" />
-              <span className="hidden sm:inline">Boxes</span>
-            </button>
-
-            <button
-              onClick={() => setShowLabels(!showLabels)}
-              className={`px-2 py-1 rounded border text-[11px] transition-colors flex items-center gap-1 ${
-                showLabels 
-                  ? 'bg-blue-600/30 border-blue-500/50 text-blue-300' 
-                  : 'border-white/10 text-slate-400 hover:bg-white/5'
-              }`}
-              title="Toggle Class Labels"
-            >
-              <Eye className="w-3 h-3" />
-              <span className="hidden sm:inline">Labels</span>
+              {isZoneEditMode ? <X className="w-3 h-3" /> : <Square className="w-3 h-3" />}
+              <span>{isZoneEditMode ? 'Cancel Zone' : '+ Draw Zone'}</span>
             </button>
 
             <button
               onClick={() => setShowZones(!showZones)}
-              className={`px-2 py-1 rounded border text-[11px] transition-colors flex items-center gap-1 ${
+              className={`px-2 py-1 rounded border text-[11px] transition-colors flex items-center gap-1 cursor-pointer ${
                 showZones 
                   ? 'bg-amber-600/30 border-amber-500/50 text-amber-300' 
                   : 'border-white/10 text-slate-400 hover:bg-white/5'
               }`}
-              title="Toggle Emergency Zones"
+              title="Toggle Zones"
             >
               <ShieldAlert className="w-3 h-3" />
               <span className="hidden sm:inline">Zones ({activeZones.length})</span>
             </button>
+
+            {backendStatus === 'connected' && (
+              <>
+                <button
+                  onClick={() => setShowBoundingBoxes(!showBoundingBoxes)}
+                  className={`px-2 py-1 rounded border text-[11px] transition-colors flex items-center gap-1 cursor-pointer ${
+                    showBoundingBoxes 
+                      ? 'bg-blue-600/30 border-blue-500/50 text-blue-300' 
+                      : 'border-white/10 text-slate-400 hover:bg-white/5'
+                  }`}
+                  title="Toggle Bounding Boxes"
+                >
+                  <Target className="w-3 h-3" />
+                  <span className="hidden sm:inline">Boxes</span>
+                </button>
+
+                <button
+                  onClick={() => setShowLabels(!showLabels)}
+                  className={`px-2 py-1 rounded border text-[11px] transition-colors flex items-center gap-1 cursor-pointer ${
+                    showLabels 
+                      ? 'bg-blue-600/30 border-blue-500/50 text-blue-300' 
+                      : 'border-white/10 text-slate-400 hover:bg-white/5'
+                  }`}
+                  title="Toggle Class Labels"
+                >
+                  <Eye className="w-3 h-3" />
+                  <span className="hidden sm:inline">Labels</span>
+                </button>
+              </>
+            )}
           </div>
 
-          {/* Right Action Controls: Fullscreen */}
-          <div className="flex items-center gap-2">
+          {/* Right Action Controls: Backend Settings & Fullscreen */}
+          <div className="flex items-center gap-1.5 sm:gap-2">
+            <button
+              onClick={() => setShowBackendModal(true)}
+              className="p-1.5 rounded hover:bg-white/10 border border-white/10 text-slate-300 hover:text-white transition-colors cursor-pointer"
+              title="Backend Connection Settings"
+            >
+              <Sliders className="w-3.5 h-3.5" />
+            </button>
+
             <button
               onClick={toggleFullscreen}
               className="p-1.5 rounded hover:bg-white/10 border border-white/10 text-slate-300 hover:text-white transition-colors cursor-pointer"
@@ -946,7 +1173,121 @@ export const LiveCameraPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Live AI Telemetry Stats Grid */}
+      {/* Backend Connection Modal / Dialog */}
+      {showBackendModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-white dark:bg-slate-850 border border-slate-200 dark:border-slate-800 rounded-lg p-5 max-w-lg w-full space-y-4 shadow-xl">
+            <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <Sliders className="w-4 h-4 text-blue-500" />
+                <h3 className="text-sm font-semibold text-slate-900 dark:text-white">AI Backend Connection</h3>
+              </div>
+              <button
+                onClick={() => setShowBackendModal(false)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs text-slate-600 dark:text-slate-300">
+              <p>
+                To enable live YOLOv8 object detection, ByteTrack tracking, and DINOv2 novelty evaluation over your live camera, connect to a running SecureCam FastAPI backend.
+              </p>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Backend API Base URL:
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={backendUrlInput}
+                    onChange={(e) => setBackendUrlInput(e.target.value)}
+                    placeholder="http://localhost:8000"
+                    className="flex-1 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded px-3 py-1.5 font-mono text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    disabled={isTestingConnection}
+                    onClick={handleTestAndConnect}
+                    icon={isTestingConnection ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                    className="cursor-pointer shrink-0"
+                  >
+                    {isTestingConnection ? 'Testing...' : 'Test & Connect'}
+                  </Button>
+                </div>
+              </div>
+
+              {/* Quick Preset Buttons */}
+              <div className="flex items-center gap-2 text-[11px]">
+                <span className="text-slate-400">Presets:</span>
+                <button
+                  type="button"
+                  onClick={() => setBackendUrlInput('http://localhost:8000')}
+                  className="px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 cursor-pointer"
+                >
+                  http://localhost:8000
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBackendUrlInput('http://127.0.0.1:8000')}
+                  className="px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 cursor-pointer"
+                >
+                  http://127.0.0.1:8000
+                </button>
+              </div>
+
+              {backendErrorDetails && (
+                <div className="p-3 bg-red-500/10 border border-red-500/30 rounded text-red-600 dark:text-red-400 text-xs">
+                  {backendErrorDetails}
+                </div>
+              )}
+
+              {backendStatus === 'connected' && (
+                <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded text-emerald-700 dark:text-emerald-300 text-xs flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                    <span>Connected to {activeConnectedUrl}</span>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleDisconnectBackend}
+                    className="text-[11px] h-7 cursor-pointer"
+                  >
+                    Disconnect
+                  </Button>
+                </div>
+              )}
+
+              <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded p-3 text-[11px] text-slate-500 dark:text-slate-400 space-y-1.5">
+                <div className="font-semibold text-slate-700 dark:text-slate-200">How Connection Works:</div>
+                <p>
+                  • <strong>Localhost:</strong> Points to the machine running your browser. If you run <code className="bg-slate-200 dark:bg-slate-800 px-1 py-0.5 rounded font-mono">python run_backend.py</code> on your computer, use <code className="font-mono">http://localhost:8000</code>.
+                </p>
+                <p>
+                  • <strong>Mobile / Remote:</strong> When accessing from a smartphone, localhost refers to the phone itself. To connect to your PC's backend, use a secure tunnel (e.g. ngrok or cloudflared) with an HTTPS / WSS endpoint.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setShowBackendModal(false)}
+                className="cursor-pointer"
+              >
+                Close
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Telemetry Stats Grid: Honest & Separated */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         {/* Metric 1: Current Raw Detections */}
         <div className="bg-white dark:bg-slate-850 border border-slate-200 dark:border-slate-800 rounded p-3">
@@ -955,9 +1296,11 @@ export const LiveCameraPage: React.FC = () => {
             <Target className="w-3.5 h-3.5 text-blue-500" />
           </div>
           <div className="text-xl font-bold text-slate-900 dark:text-white mt-1">
-            {rawDetectionsCount}
+            {backendStatus === 'connected' ? rawDetectionsCount : '—'}
           </div>
-          <p className="text-[10px] text-slate-400 mt-0.5">Objects in active frame</p>
+          <p className="text-[10px] text-slate-400 mt-0.5">
+            {backendStatus === 'connected' ? 'Objects in active frame' : 'Offline in Demo Mode'}
+          </p>
         </div>
 
         {/* Metric 2: Active Tracked Targets */}
@@ -967,9 +1310,11 @@ export const LiveCameraPage: React.FC = () => {
             <Users className="w-3.5 h-3.5 text-cyan-500" />
           </div>
           <div className="text-xl font-bold text-blue-600 dark:text-cyan-400 mt-1">
-            {activeTracksCount}
+            {backendStatus === 'connected' ? activeTracksCount : '—'}
           </div>
-          <p className="text-[10px] text-slate-400 mt-0.5">ByteTrack persistent IDs</p>
+          <p className="text-[10px] text-slate-400 mt-0.5">
+            {backendStatus === 'connected' ? 'ByteTrack persistent IDs' : 'Requires local backend'}
+          </p>
         </div>
 
         {/* Metric 3: Cumulative Unique Targets */}
@@ -979,25 +1324,29 @@ export const LiveCameraPage: React.FC = () => {
             <Activity className="w-3.5 h-3.5 text-indigo-500" />
           </div>
           <div className="text-xl font-bold text-slate-900 dark:text-white mt-1">
-            {totalTracksCount}
+            {backendStatus === 'connected' ? totalTracksCount : '—'}
           </div>
-          <p className="text-[10px] text-slate-400 mt-0.5">Unique entities observed</p>
+          <p className="text-[10px] text-slate-400 mt-0.5">
+            {backendStatus === 'connected' ? 'Unique entities observed' : 'Requires local backend'}
+          </p>
         </div>
 
         {/* Metric 4: Zone Violations */}
         <div className={`bg-white dark:bg-slate-850 border rounded p-3 transition-colors ${
-          activeViolations.length > 0 
+          activeViolations.length > 0 && backendStatus === 'connected'
             ? 'border-red-500/80 bg-red-50/20 dark:bg-red-950/20 animate-pulse' 
             : 'border-slate-200 dark:border-slate-800'
         }`}>
           <div className="flex items-center justify-between text-slate-500 dark:text-slate-400 text-xs">
             <span>Zone Breaches</span>
-            <ShieldAlert className={`w-3.5 h-3.5 ${activeViolations.length > 0 ? 'text-red-500' : 'text-slate-400'}`} />
+            <ShieldAlert className={`w-3.5 h-3.5 ${activeViolations.length > 0 && backendStatus === 'connected' ? 'text-red-500' : 'text-slate-400'}`} />
           </div>
-          <div className={`text-xl font-bold mt-1 ${activeViolations.length > 0 ? 'text-red-600 dark:text-red-400 font-extrabold' : 'text-slate-900 dark:text-white'}`}>
-            {activeViolations.length}
+          <div className={`text-xl font-bold mt-1 ${activeViolations.length > 0 && backendStatus === 'connected' ? 'text-red-600 dark:text-red-400 font-extrabold' : 'text-slate-900 dark:text-white'}`}>
+            {backendStatus === 'connected' ? activeViolations.length : 0}
           </div>
-          <p className="text-[10px] text-slate-400 mt-0.5">Emergency Zone intrusions</p>
+          <p className="text-[10px] text-slate-400 mt-0.5">
+            {backendStatus === 'connected' ? 'Emergency Zone intrusions' : `${activeZones.length} zones active`}
+          </p>
         </div>
 
         {/* Metric 5: Inference Latency */}
@@ -1007,10 +1356,10 @@ export const LiveCameraPage: React.FC = () => {
             <Cpu className="w-3.5 h-3.5 text-emerald-500" />
           </div>
           <div className="text-xl font-bold text-emerald-600 dark:text-emerald-400 mt-1 font-mono">
-            {totalLatencyMs > 0 ? `${Math.round(totalLatencyMs)}ms` : '0ms'}
+            {backendStatus === 'connected' && totalLatencyMs > 0 ? `${Math.round(totalLatencyMs)}ms` : '0ms'}
           </div>
           <p className="text-[10px] text-slate-400 mt-0.5">
-            {detectionLatencyMs > 0 ? `YOLO: ${Math.round(detectionLatencyMs)}ms` : 'Lockstep loop'}
+            {backendStatus === 'connected' ? `Pipeline: ${Math.round(detectionLatencyMs)}ms` : 'Hardware stream (0ms)'}
           </p>
         </div>
       </div>
@@ -1025,7 +1374,7 @@ export const LiveCameraPage: React.FC = () => {
           {liveEvents.length > 0 && (
             <button
               onClick={() => setLiveEvents([])}
-              className="text-[11px] text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
+              className="text-[11px] text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors cursor-pointer"
             >
               Clear Log
             </button>
@@ -1064,12 +1413,19 @@ export const LiveCameraPage: React.FC = () => {
         ) : (
           <div className="py-4 text-center text-xs text-slate-400 bg-slate-50/50 dark:bg-slate-900/40 rounded border border-dashed border-slate-200 dark:border-slate-800">
             {isStreaming ? (
-              <span className="flex items-center justify-center gap-1.5 text-emerald-600 dark:text-emerald-400">
-                <CheckCircle2 className="w-3.5 h-3.5" />
-                No security violations detected in the live camera feed. Monitored zones are secure.
-              </span>
+              backendStatus === 'connected' ? (
+                <span className="flex items-center justify-center gap-1.5 text-emerald-600 dark:text-emerald-400">
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  No security violations detected in the live camera feed. Monitored zones are secure.
+                </span>
+              ) : (
+                <span className="flex items-center justify-center gap-1.5 text-amber-600 dark:text-amber-400">
+                  <Info className="w-3.5 h-3.5" />
+                  Camera streaming locally in Demo Mode. Connect local backend for live intrusion alarms.
+                </span>
+              )
             ) : (
-              <span>Start the camera feed to monitor live objects and Emergency Zones.</span>
+              <span>Start the camera feed to monitor live video and Emergency Zones.</span>
             )}
           </div>
         )}
