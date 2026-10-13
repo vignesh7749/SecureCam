@@ -19,30 +19,27 @@ export const BoundingBoxOverlay: React.FC<BoundingBoxOverlayProps> = ({
 
   // Resolve display objects based on apiMode and available data
   const displayObjects: TrackedObject[] = React.useMemo(() => {
-    if (apiMode === 'LIVE_AI') {
-      if (objects && objects.length > 0) {
-        return objects;
-      }
-      if (realDetections && realDetections.length > 0) {
-        return realDetections.map((det, idx) => ({
-          id: det.id || `det-${idx}`,
-          trackId: det.trackingId,
-          trackingId: det.trackingId || (idx + 1),
-          className: det.className,
-          confidence: det.confidence,
-          box: det.box,
-          trajectory: [],
-          firstSeen: '',
-          lastSeen: '',
-          durationSeconds: 0,
-          movementStatus: 'moving',
-          isUnknown: det.isUnknown || false,
-        }));
-      }
-      return [];
+    if (objects && objects.length > 0) {
+      return objects;
     }
-    return objects || [];
-  }, [apiMode, objects, realDetections]);
+    if (realDetections && realDetections.length > 0) {
+      return realDetections.map((det, idx) => ({
+        id: det.id || `det-${idx}`,
+        trackId: det.trackingId,
+        trackingId: det.trackingId || (idx + 1),
+        className: det.className,
+        confidence: det.confidence,
+        box: det.box,
+        trajectory: [],
+        firstSeen: '',
+        lastSeen: '',
+        durationSeconds: 0,
+        movementStatus: 'moving',
+        isUnknown: det.isUnknown || false,
+      }));
+    }
+    return [];
+  }, [objects, realDetections]);
 
   if (displayObjects.length === 0) {
     return null;

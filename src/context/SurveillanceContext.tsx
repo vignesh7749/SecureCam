@@ -695,14 +695,52 @@ export const SurveillanceProvider: React.FC<{ children: React.ReactNode }> = ({ 
       activeSessionIdRef.current = cached.analysisId || null;
       frameTracksMapRef.current = new Map(cached.frameTracks);
       frameDetectionsMapRef.current = new Map(cached.frameDetections);
-      setTrackedObjects(cached.trackedObjects);
+      let maxF = 0;
+      for (const k of cached.frameTracks.keys()) {
+        if (k > maxF) maxF = k;
+      }
+      maxFrameRef.current = maxF;
+
       if (cached.allSessionTargets) {
         const tMap = new Map<number, TrackedObject>();
         cached.allSessionTargets.forEach(t => tMap.set(t.trackingId, t));
         allTargetsMapRef.current = tMap;
         setAllSessionTargets(cached.allSessionTargets);
       }
-      setRealDetections(cached.realDetections);
+
+      const v = videoElementRef.current;
+      const curTime = v ? v.currentTime : 0;
+      const curDur = (v && v.duration > 0) ? v.duration : (totalDurationSeconds > 0 ? totalDurationSeconds : 0);
+      let targetFrame = 0;
+      if (curDur > 0 && maxF > 0) {
+        const ratio = Math.max(0, Math.min(1, curTime / curDur));
+        targetFrame = Math.round(ratio * maxF);
+      }
+      currentFrameRef.current = targetFrame;
+      setCurrentFrame(targetFrame);
+      lastProcessedFrameRef.current = -1;
+
+      let curTracks = frameTracksMapRef.current.get(targetFrame);
+      let curDets = frameDetectionsMapRef.current.get(targetFrame);
+      if (!curTracks || curTracks.length === 0) {
+        for (let offset = 1; offset <= 15; offset++) {
+          const prev = frameTracksMapRef.current.get(targetFrame - offset);
+          if (prev && prev.length > 0) {
+            curTracks = prev;
+            curDets = frameDetectionsMapRef.current.get(targetFrame - offset);
+            break;
+          }
+          const next = frameTracksMapRef.current.get(targetFrame + offset);
+          if (next && next.length > 0) {
+            curTracks = next;
+            curDets = frameDetectionsMapRef.current.get(targetFrame + offset);
+            break;
+          }
+        }
+      }
+
+      setTrackedObjects(curTracks || cached.trackedObjects || []);
+      setRealDetections(curDets || cached.realDetections || []);
       setUnknownObjects(cached.unknownObjects);
       setActiveViolations(cached.activeViolations);
       setTotalUniqueTracksCount(cached.totalUniqueTracksCount);
@@ -800,10 +838,9 @@ export const SurveillanceProvider: React.FC<{ children: React.ReactNode }> = ({ 
       }
     }
 
-    // Demo Mode & Static Hosting: check for authentic precomputed benchmark session
-    if (apiModeRef.current === 'DEMO' || !BACKEND_URL) {
-      try {
-        const precomputed = await realSurveillanceApi.loadPrecomputedSession(newVideoId);
+    // Check for authentic precomputed benchmark session (Demo Mode, static hosting, or fallback)
+    try {
+      const precomputed = await realSurveillanceApi.loadPrecomputedSession(newVideoId);
         if (precomputed && Array.isArray(precomputed.tracks) && precomputed.tracks.length > 0) {
           activeSessionIdRef.current = precomputed.summary?.analysisId || `demo-${newVideoId}`;
           setAnalysisProgress(100);
@@ -857,9 +894,40 @@ export const SurveillanceProvider: React.FC<{ children: React.ReactNode }> = ({ 
           setAllSessionTargets(aggregatedTargets);
           setTotalUniqueTracksCount(precomputed.summary?.uniqueTracksCount || aggregatedTargets.length);
 
-          const initialTracks = frameTracksMapRef.current.get(0) || frameTracksMapRef.current.get(5) || [];
-          setTrackedObjects(initialTracks);
-          setRealDetections(frameDetectionsMapRef.current.get(0) || frameDetectionsMapRef.current.get(5) || []);
+          const v = videoElementRef.current;
+          const curTime = v ? v.currentTime : 0;
+          const curDur = (v && v.duration > 0) ? v.duration : (precomputed.summary?.durationSeconds || 0);
+          let targetFrame = 0;
+          if (curDur > 0 && maxF > 0) {
+            const ratio = Math.max(0, Math.min(1, curTime / curDur));
+            targetFrame = Math.round(ratio * maxF);
+          }
+          currentFrameRef.current = targetFrame;
+          setCurrentFrame(targetFrame);
+          lastProcessedFrameRef.current = -1;
+
+          let activeTracks = frameTracksMapRef.current.get(targetFrame);
+          let activeDets = frameDetectionsMapRef.current.get(targetFrame);
+          if (!activeTracks || activeTracks.length === 0) {
+            for (let offset = 1; offset <= 15; offset++) {
+              const prev = frameTracksMapRef.current.get(targetFrame - offset);
+              if (prev && prev.length > 0) {
+                activeTracks = prev;
+                activeDets = frameDetectionsMapRef.current.get(targetFrame - offset);
+                break;
+              }
+              const next = frameTracksMapRef.current.get(targetFrame + offset);
+              if (next && next.length > 0) {
+                activeTracks = next;
+                activeDets = frameDetectionsMapRef.current.get(targetFrame + offset);
+                break;
+              }
+            }
+          }
+          const finalTracks = activeTracks || [];
+          const finalDets = activeDets || [];
+          setTrackedObjects(finalTracks);
+          setRealDetections(finalDets);
 
           setModelConfig({
             name: "YOLOv8n (Precomputed Benchmark)",
@@ -875,9 +943,9 @@ export const SurveillanceProvider: React.FC<{ children: React.ReactNode }> = ({ 
             analysisId: activeSessionIdRef.current,
             status: 'COMPLETED',
             progress: 100,
-            trackedObjects: initialTracks,
+            trackedObjects: finalTracks,
             allSessionTargets: aggregatedTargets,
-            realDetections: frameDetectionsMapRef.current.get(0) || [],
+            realDetections: finalDets,
             frameTracks: new Map(frameTracksMapRef.current),
             frameDetections: new Map(frameDetectionsMapRef.current),
             unknownObjects: [],
@@ -890,7 +958,6 @@ export const SurveillanceProvider: React.FC<{ children: React.ReactNode }> = ({ 
       } catch (err) {
         console.warn('Precomputed benchmark session load notice:', err);
       }
-    }
 
     // Fresh session / Clean Raw Video Playback without precomputed data
     setIsPrecomputedDemoReplay(false);
@@ -1348,7 +1415,7 @@ export const SurveillanceProvider: React.FC<{ children: React.ReactNode }> = ({ 
       let trks = frameTracksMapRef.current.get(frame);
       let dets = frameDetectionsMapRef.current.get(frame);
 
-      if (!trks && frameTracksMapRef.current.size > 0) {
+      if (trks === undefined && frameTracksMapRef.current.size > 0) {
         // Fast tolerant nearest frame lookup within +/- 8 frames
         for (let offset = 1; offset <= 8; offset++) {
           if (frameTracksMapRef.current.has(frame - offset)) {
@@ -1364,7 +1431,7 @@ export const SurveillanceProvider: React.FC<{ children: React.ReactNode }> = ({ 
         }
       }
 
-      if (trks) {
+      if (trks !== undefined) {
         setTrackedObjects(trks);
         setRealDetections(dets || []);
       } else if (frameTracksMapRef.current.size > 0) {
@@ -1482,36 +1549,40 @@ export const SurveillanceProvider: React.FC<{ children: React.ReactNode }> = ({ 
       videoElementRef.current.currentTime = seconds;
     }
     setCurrentTimeSeconds(seconds);
-    const currentFps = activeSourceRef.current?.fps || videoFps || 15;
-    const frame = Math.round(seconds * currentFps);
+    const dur = totalDurationSeconds > 0 ? totalDurationSeconds : (videoElementRef.current?.duration || 0);
+    let frame: number;
+    if (dur > 0 && maxFrameRef.current > 0) {
+      const ratio = Math.max(0, Math.min(1, seconds / dur));
+      frame = Math.round(ratio * maxFrameRef.current);
+    } else {
+      const currentFps = activeSourceRef.current?.fps || videoFps || 15;
+      frame = Math.round(seconds * currentFps);
+    }
+    lastProcessedFrameRef.current = frame;
     setCurrentFrame(frame);
     currentFrameRef.current = frame;
+
     if (frameTracksMapRef.current.size > 0) {
-      if (frameTracksMapRef.current.has(frame)) {
-        const trks = frameTracksMapRef.current.get(frame)!;
-        setTrackedObjects(trks);
-        setRealDetections(frameDetectionsMapRef.current.get(frame) || []);
-      } else {
-        let closestFrame = -1;
-        let minDiff = 7;
-        for (const fIdx of frameTracksMapRef.current.keys()) {
-          const diff = Math.abs(fIdx - frame);
-          if (diff < minDiff) {
-            minDiff = diff;
-            closestFrame = fIdx;
+      let trks = frameTracksMapRef.current.get(frame);
+      let dets = frameDetectionsMapRef.current.get(frame);
+      if (trks === undefined) {
+        for (let offset = 1; offset <= 10; offset++) {
+          if (frameTracksMapRef.current.has(frame - offset)) {
+            trks = frameTracksMapRef.current.get(frame - offset);
+            dets = frameDetectionsMapRef.current.get(frame - offset);
+            break;
+          }
+          if (frameTracksMapRef.current.has(frame + offset)) {
+            trks = frameTracksMapRef.current.get(frame + offset);
+            dets = frameDetectionsMapRef.current.get(frame + offset);
+            break;
           }
         }
-        if (closestFrame !== -1) {
-          const trks = frameTracksMapRef.current.get(closestFrame)!;
-          setTrackedObjects(trks);
-          setRealDetections(frameDetectionsMapRef.current.get(closestFrame) || []);
-        } else if (frameTracksMapRef.current.size > 0) {
-          setTrackedObjects([]);
-          setRealDetections([]);
-        }
       }
+      setTrackedObjects(trks || []);
+      setRealDetections(dets || []);
     }
-  }, [videoFps]);
+  }, [totalDurationSeconds, videoFps]);
 
   const setSpeed = useCallback((speed: number) => {
     setPlaybackSpeed(speed);

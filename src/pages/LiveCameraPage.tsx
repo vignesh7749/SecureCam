@@ -58,11 +58,15 @@ export const LiveCameraPage: React.FC = () => {
 
   // Media & Device State
   const [isStreaming, setIsStreaming] = useState<boolean>(false);
-  const [permissionState, setPermissionState] = useState<'idle' | 'requesting' | 'granted' | 'denied' | 'insecure_context' | 'unavailable'>('idle');
+  const [isVideoLoading, setIsVideoLoading] = useState<boolean>(false);
+  const [isVideoPlaying, setIsVideoPlaying] = useState<boolean>(false);
+  const [videoPlayFailed, setVideoPlayFailed] = useState<boolean>(false);
+  const [permissionState, setPermissionState] = useState<'idle' | 'requesting' | 'granted' | 'denied' | 'insecure_context' | 'unavailable' | 'unsupported'>('idle');
   const [cameraErrorMessage, setCameraErrorMessage] = useState<string | null>(null);
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('environment');
   const [availableDevices, setAvailableDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string>('');
+  const isStartingRef = useRef<boolean>(false);
 
   // Dual-Mode Backend Connection State
   const [backendStatus, setBackendStatus] = useState<'connected' | 'connecting' | 'disconnected' | 'error'>('disconnected');
@@ -192,6 +196,82 @@ export const LiveCameraPage: React.FC = () => {
     }
   }, []);
 
+  // Video playback lifecycle handlers
+  const handleLoadedMetadata = useCallback(() => {
+    setIsVideoLoading(false);
+    updateDimensions();
+  }, [updateDimensions]);
+
+  const handleLoadedData = useCallback(() => {
+    setIsVideoLoading(false);
+    setIsVideoPlaying(true);
+    updateDimensions();
+  }, [updateDimensions]);
+
+  const handlePlaying = useCallback(() => {
+    setIsVideoLoading(false);
+    setIsVideoPlaying(true);
+    setVideoPlayFailed(false);
+  }, []);
+
+  const handleWaiting = useCallback(() => {
+    setIsVideoLoading(true);
+  }, []);
+
+  const handleVideoError = useCallback((e: React.SyntheticEvent<HTMLVideoElement, Event>) => {
+    console.warn('[SecureCam] Video element error event:', e);
+    setIsVideoLoading(false);
+    setVideoPlayFailed(true);
+  }, []);
+
+  // Ref callback to bind stream immediately when video node mounts
+  const setVideoRef = useCallback((node: HTMLVideoElement | null) => {
+    videoRef.current = node;
+    if (node) {
+      node.muted = true;
+      node.defaultMuted = true;
+      node.playsInline = true;
+      node.setAttribute('playsinline', 'true');
+      node.setAttribute('muted', 'true');
+      if (streamRef.current && node.srcObject !== streamRef.current) {
+        node.srcObject = streamRef.current;
+        node.play().then(() => {
+          setIsVideoPlaying(true);
+          setIsVideoLoading(false);
+          setVideoPlayFailed(false);
+        }).catch(err => {
+          console.warn('[SecureCam] Video play rejection in ref callback:', err);
+          setVideoPlayFailed(true);
+          setIsVideoLoading(false);
+        });
+      }
+    }
+  }, []);
+
+  // Passive synchronization effect ensuring stream attachment on state updates
+  useEffect(() => {
+    if (isStreaming && streamRef.current && videoRef.current) {
+      const v = videoRef.current;
+      v.muted = true;
+      v.defaultMuted = true;
+      v.playsInline = true;
+      v.setAttribute('playsinline', 'true');
+      v.setAttribute('muted', 'true');
+      if (v.srcObject !== streamRef.current) {
+        v.srcObject = streamRef.current;
+      }
+      v.play().then(() => {
+        setIsVideoPlaying(true);
+        setIsVideoLoading(false);
+        setVideoPlayFailed(false);
+      }).catch(playErr => {
+        console.warn('[SecureCam] Video play rejection in sync effect:', playErr);
+        setVideoPlayFailed(true);
+        setIsVideoLoading(false);
+      });
+    }
+  }, [isStreaming]);
+
   // Cleanup media stream and WebSocket
   const stopStream = useCallback(() => {
     if (frameLoopTimerRef.current !== null) {
@@ -221,6 +301,9 @@ export const LiveCameraPage: React.FC = () => {
     }
 
     setIsStreaming(false);
+    setIsVideoLoading(false);
+    setIsVideoPlaying(false);
+    setVideoPlayFailed(false);
     setLiveTracks([]);
     setRawDetectionsCount(0);
     setActiveTracksCount(0);
@@ -415,9 +498,14 @@ export const LiveCameraPage: React.FC = () => {
     };
   }, []);
 
-  // Request User Media and Start Stream
-  const startStream = useCallback(async () => {
+  // Request User Media and Start Stream with specific parameters
+  const startStreamWithParams = useCallback(async (targetDeviceId?: string, targetFacingMode?: 'user' | 'environment') => {
+    if (isStartingRef.current) return;
+    isStartingRef.current = true;
+
     setCameraErrorMessage(null);
+    setVideoPlayFailed(false);
+    setIsVideoLoading(true);
     setPermissionState('requesting');
 
     // Secure context pre-check (protects mobile LAN access)
@@ -426,21 +514,38 @@ export const LiveCameraPage: React.FC = () => {
       setCameraErrorMessage(
         'Camera access requires a Secure Context (HTTPS or localhost). Modern mobile browsers block camera access over plain HTTP when connected via LAN IP. Please run with HTTPS or test on localhost.'
       );
+      setIsVideoLoading(false);
+      isStartingRef.current = false;
       return;
     }
 
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      setPermissionState('unavailable');
+      setPermissionState('unsupported');
       setCameraErrorMessage('MediaDevices API is not supported on this browser or platform.');
+      setIsVideoLoading(false);
+      isStartingRef.current = false;
       return;
     }
 
+    // Stop previous stream tracks cleanly before switching
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => {
+        try {
+          track.stop();
+        } catch {}
+      });
+      streamRef.current = null;
+    }
+
+    const effectiveFacingMode = targetFacingMode || facingMode;
+    const effectiveDeviceId = targetDeviceId !== undefined ? targetDeviceId : selectedDeviceId;
+
     try {
       const constraints: MediaStreamConstraints = {
-        video: selectedDeviceId 
-          ? { deviceId: { exact: selectedDeviceId }, width: { ideal: 1280 }, height: { ideal: 720 } }
+        video: effectiveDeviceId 
+          ? { deviceId: { exact: effectiveDeviceId }, width: { ideal: 1280 }, height: { ideal: 720 } }
           : { 
-              facingMode: facingMode,
+              facingMode: effectiveFacingMode,
               width: { ideal: 1280 }, 
               height: { ideal: 720 } 
             },
@@ -463,17 +568,30 @@ export const LiveCameraPage: React.FC = () => {
       setIsStreaming(true);
 
       if (videoRef.current) {
-        videoRef.current.srcObject = stream;
+        const v = videoRef.current;
+        v.muted = true;
+        v.defaultMuted = true;
+        v.playsInline = true;
+        v.setAttribute('playsinline', 'true');
+        v.setAttribute('muted', 'true');
+        v.srcObject = stream;
         try {
-          await videoRef.current.play();
+          const playPromise = v.play();
+          if (playPromise !== undefined) {
+            await playPromise;
+            setIsVideoPlaying(true);
+            setIsVideoLoading(false);
+          }
         } catch (playErr) {
-          console.warn('[SecureCam] AutoPlay note:', playErr);
+          console.warn('[SecureCam] Video play rejection:', playErr);
+          setVideoPlayFailed(true);
+          setIsVideoLoading(false);
         }
       }
 
       await refreshDevices();
 
-      // If a backend URL is configured, connect WebSocket; otherwise stay peacefully in Demo Mode
+      // If a backend URL is configured, connect WebSocket; otherwise stay in Demo Mode
       const activeUrl = getActiveBackendUrl();
       if (activeUrl) {
         connectWebSocket(activeUrl);
@@ -482,6 +600,8 @@ export const LiveCameraPage: React.FC = () => {
       }
     } catch (err: any) {
       console.warn('[SecureCam] Camera access notice:', err);
+      setIsVideoLoading(false);
+      setIsVideoPlaying(false);
       if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
         setPermissionState('denied');
         setCameraErrorMessage('Camera access was denied. Please allow camera permissions in your browser address bar.');
@@ -496,29 +616,34 @@ export const LiveCameraPage: React.FC = () => {
         setCameraErrorMessage(`Camera error: ${err.message || 'Unknown media error'}`);
       }
       setIsStreaming(false);
+    } finally {
+      isStartingRef.current = false;
     }
   }, [facingMode, selectedDeviceId, connectWebSocket, refreshDevices]);
+
+  // Public startStream entry point
+  const startStream = useCallback(() => {
+    return startStreamWithParams();
+  }, [startStreamWithParams]);
 
   // Flip camera between Front and Rear
   const toggleFacingMode = useCallback(async () => {
     const nextMode = facingMode === 'environment' ? 'user' : 'environment';
     setFacingMode(nextMode);
+    setSelectedDeviceId('');
 
     if (isStreaming) {
-      stopStream();
-      setTimeout(() => {
-        setFacingMode(nextMode);
-      }, 50);
+      await startStreamWithParams('', nextMode);
     }
-  }, [facingMode, isStreaming, stopStream]);
+  }, [facingMode, isStreaming, startStreamWithParams]);
 
   // Handle device change
-  const handleDeviceChange = (deviceId: string) => {
+  const handleDeviceChange = useCallback(async (deviceId: string) => {
     setSelectedDeviceId(deviceId);
     if (isStreaming) {
-      stopStream();
+      await startStreamWithParams(deviceId, facingMode);
     }
-  };
+  }, [isStreaming, facingMode, startStreamWithParams]);
 
   // Launch frame loop when streaming begins
   useEffect(() => {
@@ -776,256 +901,317 @@ export const LiveCameraPage: React.FC = () => {
           className="relative w-full h-full flex-1 flex items-center justify-center overflow-hidden"
           style={{ minHeight: isFullscreen ? '100vh' : '420px' }}
         >
-          {/* Active Camera Video Frame */}
-          {isStreaming ? (
-            <div 
-              className="relative overflow-hidden flex items-center justify-center"
-              style={
-                renderedDimensions.width > 0 && renderedDimensions.height > 0
-                  ? { width: `${renderedDimensions.width}px`, height: `${renderedDimensions.height}px` }
-                  : { width: '100%', height: '100%', aspectRatio: '16 / 9' }
-              }
-            >
-              <video
-                ref={videoRef}
-                autoPlay
-                playsInline
-                muted
-                onLoadedMetadata={updateDimensions}
-                onLoadedData={updateDimensions}
-                className="w-full h-full object-contain block select-none bg-black"
-              />
+          {/* Active Camera Video Frame - Permanently mounted so videoRef is always valid */}
+          <div 
+            className="relative overflow-hidden flex items-center justify-center max-w-full max-h-full"
+            style={
+              renderedDimensions.width > 0 && renderedDimensions.height > 0
+                ? { width: `${renderedDimensions.width}px`, height: `${renderedDimensions.height}px` }
+                : { width: '100%', height: '100%', minHeight: '380px' }
+            }
+          >
+            <video
+              ref={setVideoRef}
+              autoPlay
+              playsInline
+              muted
+              onLoadedMetadata={handleLoadedMetadata}
+              onLoadedData={handleLoadedData}
+              onPlaying={handlePlaying}
+              onWaiting={handleWaiting}
+              onError={handleVideoError}
+              className={`w-full h-full object-contain block select-none bg-black transition-opacity duration-200 ${
+                isStreaming ? 'opacity-100' : 'opacity-0 pointer-events-none'
+              }`}
+            />
 
-              {/* HUD Layer 1: Emergency Zones Overlay */}
-              {showZones && !isZoneEditMode && (
-                <div className="absolute inset-0 pointer-events-none z-10">
-                  <svg className="w-full h-full absolute inset-0">
-                    <defs>
-                      <pattern id="live-danger-stripes" width="20" height="20" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-                        <line x1="0" y1="0" x2="0" y2="20" stroke="rgba(239, 68, 68, 0.25)" strokeWidth="4" />
-                      </pattern>
-                      <pattern id="live-caution-stripes" width="20" height="20" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-                        <line x1="0" y1="0" x2="0" y2="20" stroke="rgba(245, 158, 11, 0.2)" strokeWidth="4" />
-                      </pattern>
-                    </defs>
+            {/* Overlays rendered when streaming */}
+            {isStreaming && (
+              <>
+                {/* HUD Layer 1: Emergency Zones Overlay */}
+                {showZones && !isZoneEditMode && (
+                  <div className="absolute inset-0 pointer-events-none z-10">
+                    <svg className="w-full h-full absolute inset-0">
+                      <defs>
+                        <pattern id="live-danger-stripes" width="20" height="20" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                          <line x1="0" y1="0" x2="0" y2="20" stroke="rgba(239, 68, 68, 0.25)" strokeWidth="4" />
+                        </pattern>
+                        <pattern id="live-caution-stripes" width="20" height="20" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                          <line x1="0" y1="0" x2="0" y2="20" stroke="rgba(245, 158, 11, 0.2)" strokeWidth="4" />
+                        </pattern>
+                      </defs>
 
-                    {activeZones.map(zone => {
-                      const isViolation = backendStatus === 'connected' && activeViolations.some(v => v.zoneId === zone.id && v.status === 'ACTIVE');
-                      const strokeColor = isViolation ? '#EF4444' : (zone.type === 'emergency' ? '#EF4444' : '#F59E0B');
-                      const fillColor = isViolation ? 'rgba(239, 68, 68, 0.25)' : (zone.type === 'emergency' ? 'rgba(239, 68, 68, 0.08)' : 'rgba(245, 158, 11, 0.06)');
+                      {activeZones.map(zone => {
+                        const isViolation = backendStatus === 'connected' && activeViolations.some(v => v.zoneId === zone.id && v.status === 'ACTIVE');
+                        const strokeColor = isViolation ? '#EF4444' : (zone.type === 'emergency' ? '#EF4444' : '#F59E0B');
+                        const fillColor = isViolation ? 'rgba(239, 68, 68, 0.25)' : (zone.type === 'emergency' ? 'rgba(239, 68, 68, 0.08)' : 'rgba(245, 158, 11, 0.06)');
 
-                      let pointsString = '';
-                      if (zone.shape === 'rectangle' && zone.points.length >= 4) {
-                        const xs = zone.points.map(p => p.x);
-                        const ys = zone.points.map(p => p.y);
-                        const minX = Math.min(...xs);
-                        const maxX = Math.max(...xs);
-                        const minY = Math.min(...ys);
-                        const maxY = Math.max(...ys);
-                        pointsString = `${minX}%,${minY}% ${maxX}%,${minY}% ${maxX}%,${maxY}% ${minX}%,${maxY}%`;
-                      } else {
-                        pointsString = zone.points.map(p => `${p.x}%,${p.y}%`).join(' ');
+                        let pointsString = '';
+                        if (zone.shape === 'rectangle' && zone.points.length >= 4) {
+                          const xs = zone.points.map(p => p.x);
+                          const ys = zone.points.map(p => p.y);
+                          const minX = Math.min(...xs);
+                          const maxX = Math.max(...xs);
+                          const minY = Math.min(...ys);
+                          const maxY = Math.max(...ys);
+                          pointsString = `${minX}%,${minY}% ${maxX}%,${minY}% ${maxX}%,${maxY}% ${minX}%,${maxY}%`;
+                        } else {
+                          pointsString = zone.points.map(p => `${p.x}%,${p.y}%`).join(' ');
+                        }
+
+                        return (
+                          <g key={`zone-${zone.id}`}>
+                            <polygon
+                              points={pointsString}
+                              fill={fillColor}
+                              stroke={strokeColor}
+                              strokeWidth="2"
+                              strokeDasharray={isViolation ? 'none' : '4 3'}
+                            />
+                            {zone.points.length > 0 && (
+                              <text
+                                x={`${zone.points[0].x + 1}%`}
+                                y={`${zone.points[0].y + 4}%`}
+                                fill={strokeColor}
+                                fontSize="11"
+                                fontWeight="bold"
+                                fontFamily="monospace"
+                                className="select-none filter drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]"
+                              >
+                                {zone.name.toUpperCase()} {isViolation ? '[VIOLATION]' : (backendStatus !== 'connected' ? '[GEOMETRY]' : '')}
+                              </text>
+                            )}
+                          </g>
+                        );
+                      })}
+                    </svg>
+                  </div>
+                )}
+
+                {/* HUD Layer 2: Interactive Zone Drawing Canvas */}
+                {isZoneEditMode && (
+                  <div className="absolute inset-0 z-40 pointer-events-auto">
+                    <ZoneEditorCanvas
+                      isDrawing={isZoneEditMode}
+                      drawingShape={drawingShape}
+                      setDrawingShape={setDrawingShape}
+                      draftPoints={draftPoints}
+                      setDraftPoints={setDraftPoints}
+                      onFinishZone={(name, type, threshold) => {
+                        finishDraftZone(name, type, threshold);
+                      }}
+                      onCancel={() => {
+                        cancelDraftZone();
+                      }}
+                    />
+                  </div>
+                )}
+
+                {/* HUD Layer 3: Genuine YOLOv8 Detections & ByteTrack IDs (Active only with backend) */}
+                {showBoundingBoxes && backendStatus === 'connected' && (
+                  <div className="absolute inset-0 pointer-events-none z-20">
+                    {liveTracks.map(track => {
+                      const trackIdNum = track.trackId ?? track.trackingId;
+                      const trackIdStr = trackIdNum !== undefined ? `#${String(trackIdNum).padStart(2, '0')}` : '';
+                      const isKnown = !!track.className && track.className.toLowerCase() !== 'unknown' && !track.className.startsWith('object_');
+                      const displayClass = isKnown ? track.className.toUpperCase() : 'UNKNOWN';
+                      const isViolating = (track.dwellTimeInZone || 0) >= 10 || activeViolations.some(v => v.trackingId === trackIdNum);
+                      const isUnknown = track.isUnknown || !isKnown;
+
+                      let borderColor = 'border-blue-500';
+                      let badgeBg = 'bg-blue-600 text-white';
+
+                      if (isViolating) {
+                        borderColor = 'border-red-500 animate-pulse';
+                        badgeBg = 'bg-red-600 text-white font-bold';
+                      } else if (isUnknown) {
+                        borderColor = 'border-amber-500';
+                        badgeBg = 'bg-amber-600 text-white font-semibold';
                       }
 
+                      const boxX = track.box?.x ?? 0;
+                      const boxY = track.box?.y ?? 0;
+                      const boxW = track.box?.width ?? 0;
+                      const boxH = track.box?.height ?? 0;
+                      const conf = Math.round((track.confidence || 0) * 100);
+
                       return (
-                        <g key={`zone-${zone.id}`}>
-                          <polygon
-                            points={pointsString}
-                            fill={fillColor}
-                            stroke={strokeColor}
-                            strokeWidth="2"
-                            strokeDasharray={isViolation ? 'none' : '4 3'}
-                          />
-                          {zone.points.length > 0 && (
-                            <text
-                              x={`${zone.points[0].x + 1}%`}
-                              y={`${zone.points[0].y + 4}%`}
-                              fill={strokeColor}
-                              fontSize="11"
-                              fontWeight="bold"
-                              fontFamily="monospace"
-                              className="select-none filter drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]"
+                        <div
+                          key={`track-${track.id || trackIdNum}`}
+                          style={{
+                            left: `${boxX}%`,
+                            top: `${boxY}%`,
+                            width: `${boxW}%`,
+                            height: `${boxH}%`,
+                          }}
+                          className={`absolute border-2 ${borderColor} transition-all duration-75`}
+                        >
+                          {showLabels && (
+                            <div
+                              className={`absolute ${boxY < 5 ? 'top-0' : '-top-5'} left-0 px-1.5 py-0.5 text-[9px] sm:text-[10px] font-mono whitespace-nowrap shadow-sm ${badgeBg} rounded-t-sm`}
                             >
-                              {zone.name.toUpperCase()} {isViolation ? '[VIOLATION]' : (backendStatus !== 'connected' ? '[GEOMETRY]' : '')}
-                            </text>
+                              <span>{displayClass} {trackIdStr} {conf}%</span>
+                              {isViolating && <span className="ml-1 text-[8px] underline">VIOLATION</span>}
+                            </div>
                           )}
-                        </g>
+                        </div>
                       );
                     })}
-                  </svg>
-                </div>
-              )}
-
-              {/* HUD Layer 2: Interactive Zone Drawing Canvas */}
-              {isZoneEditMode && (
-                <div className="absolute inset-0 z-40 pointer-events-auto">
-                  <ZoneEditorCanvas
-                    isDrawing={isZoneEditMode}
-                    drawingShape={drawingShape}
-                    setDrawingShape={setDrawingShape}
-                    draftPoints={draftPoints}
-                    setDraftPoints={setDraftPoints}
-                    onFinishZone={(name, type, threshold) => {
-                      finishDraftZone(name, type, threshold);
-                    }}
-                    onCancel={() => {
-                      cancelDraftZone();
-                    }}
-                  />
-                </div>
-              )}
-
-              {/* HUD Layer 3: Genuine YOLOv8 Detections & ByteTrack IDs (Active only with backend) */}
-              {showBoundingBoxes && backendStatus === 'connected' && (
-                <div className="absolute inset-0 pointer-events-none z-20">
-                  {liveTracks.map(track => {
-                    const trackIdNum = track.trackId ?? track.trackingId;
-                    const trackIdStr = trackIdNum !== undefined ? `#${String(trackIdNum).padStart(2, '0')}` : '';
-                    const isKnown = !!track.className && track.className.toLowerCase() !== 'unknown' && !track.className.startsWith('object_');
-                    const displayClass = isKnown ? track.className.toUpperCase() : 'UNKNOWN';
-                    const isViolating = (track.dwellTimeInZone || 0) >= 10 || activeViolations.some(v => v.trackingId === trackIdNum);
-                    const isUnknown = track.isUnknown || !isKnown;
-
-                    let borderColor = 'border-blue-500';
-                    let badgeBg = 'bg-blue-600 text-white';
-
-                    if (isViolating) {
-                      borderColor = 'border-red-500 animate-pulse';
-                      badgeBg = 'bg-red-600 text-white font-bold';
-                    } else if (isUnknown) {
-                      borderColor = 'border-amber-500';
-                      badgeBg = 'bg-amber-600 text-white font-semibold';
-                    }
-
-                    const boxX = track.box?.x ?? 0;
-                    const boxY = track.box?.y ?? 0;
-                    const boxW = track.box?.width ?? 0;
-                    const boxH = track.box?.height ?? 0;
-                    const conf = Math.round((track.confidence || 0) * 100);
-
-                    return (
-                      <div
-                        key={`track-${track.id || trackIdNum}`}
-                        style={{
-                          left: `${boxX}%`,
-                          top: `${boxY}%`,
-                          width: `${boxW}%`,
-                          height: `${boxH}%`,
-                        }}
-                        className={`absolute border-2 ${borderColor} transition-all duration-75`}
-                      >
-                        {showLabels && (
-                          <div
-                            className={`absolute ${boxY < 5 ? 'top-0' : '-top-5'} left-0 px-1.5 py-0.5 text-[9px] sm:text-[10px] font-mono whitespace-nowrap shadow-sm ${badgeBg} rounded-t-sm`}
-                          >
-                            <span>{displayClass} {trackIdStr} {conf}%</span>
-                            {isViolating && <span className="ml-1 text-[8px] underline">VIOLATION</span>}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-
-              {/* HUD Corner Watermarks */}
-              <div className="absolute top-3 left-3 z-30 pointer-events-none flex items-center gap-2">
-                <span className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-black/70 backdrop-blur-sm border border-white/10 text-white text-[11px] font-mono">
-                  <span className="w-2 h-2 rounded-full bg-red-500 animate-ping" />
-                  <span className="font-bold text-red-400">CAMERA ACTIVE</span>
-                  <span className="text-white/60">|</span>
-                  <span>{facingMode === 'environment' ? 'Rear Lens' : 'Front Lens'}</span>
-                </span>
-                {backendStatus === 'connected' && pipelineFps > 0 && (
-                  <span className="px-1.5 py-0.5 rounded bg-black/70 backdrop-blur-sm border border-white/10 text-emerald-400 text-[10px] font-mono">
-                    {pipelineFps.toFixed(1)} FPS
-                  </span>
-                )}
-              </div>
-
-              {/* HUD Center Mode Pill */}
-              <div className="absolute top-3 right-3 z-30 pointer-events-none">
-                {backendStatus === 'connected' ? (
-                  <span className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-blue-950/80 backdrop-blur-sm border border-blue-500/50 text-blue-300 text-[10px] font-bold">
-                    <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
-                    [LIVE AI: YOLOv8 + ByteTrack]
-                  </span>
-                ) : (
-                  <span className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-amber-950/80 backdrop-blur-sm border border-amber-500/50 text-amber-300 text-[10px] font-bold">
-                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-                    [CAMERA ACTIVE • AI BACKEND OFFLINE (DEMO MODE)]
-                  </span>
-                )}
-              </div>
-            </div>
-          ) : (
-            /* Standby / Initial State Card */
-            <div className="text-center p-6 sm:p-8 max-w-md mx-auto space-y-4 text-slate-300">
-              <div className="w-16 h-16 mx-auto rounded-full bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-400">
-                <Camera className="w-8 h-8 text-blue-500" />
-              </div>
-
-              <div>
-                <h3 className="text-base font-semibold text-white tracking-tight">Camera Feed Standby</h3>
-                <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                  Start your device's camera to monitor the live feed, test interactive Emergency Zones, or connect to your local YOLOv8 AI pipeline.
-                </p>
-                {permissionState === 'requesting' && (
-                  <div className="mt-2.5 text-xs text-amber-400 flex items-center justify-center gap-1.5 animate-pulse">
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    <span>Prompting for camera permission in browser...</span>
                   </div>
                 )}
-                {permissionState === 'denied' && (
-                  <div className="mt-2.5 text-xs text-red-400 flex items-center justify-center gap-1.5">
-                    <AlertTriangle className="w-3.5 h-3.5" />
-                    <span>Camera permission was denied. Please allow camera access in your browser settings.</span>
-                  </div>
-                )}
-                {permissionState === 'insecure_context' && (
-                  <div className="mt-2.5 text-xs text-amber-400 flex items-center justify-center gap-1.5">
-                    <AlertTriangle className="w-3.5 h-3.5" />
-                    <span>Insecure Context: HTTPS or localhost required for camera access.</span>
-                  </div>
-                )}
-              </div>
 
-              <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-2.5">
+                {/* HUD Corner Watermarks */}
+                <div className="absolute top-3 left-3 z-30 pointer-events-none flex items-center gap-2">
+                  <span className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-black/70 backdrop-blur-sm border border-white/10 text-white text-[11px] font-mono">
+                    <span className="w-2 h-2 rounded-full bg-red-500 animate-ping" />
+                    <span className={`font-bold ${isVideoPlaying ? 'text-red-400' : 'text-amber-300'}`}>
+                      {isVideoPlaying ? 'CAMERA ACTIVE' : 'INITIALIZING SENSOR'}
+                    </span>
+                    <span className="text-white/60">|</span>
+                    <span>{facingMode === 'environment' ? 'Rear Lens' : 'Front Lens'}</span>
+                  </span>
+                  {backendStatus === 'connected' && pipelineFps > 0 && (
+                    <span className="px-1.5 py-0.5 rounded bg-black/70 backdrop-blur-sm border border-white/10 text-emerald-400 text-[10px] font-mono">
+                      {pipelineFps.toFixed(1)} FPS
+                    </span>
+                  )}
+                </div>
+
+                {/* HUD Center Mode Pill */}
+                <div className="absolute top-3 right-3 z-30 pointer-events-none">
+                  {backendStatus === 'connected' ? (
+                    <span className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-blue-950/80 backdrop-blur-sm border border-blue-500/50 text-blue-300 text-[10px] font-bold">
+                      <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
+                      [LIVE AI: YOLOv8 + ByteTrack]
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-amber-950/80 backdrop-blur-sm border border-amber-500/50 text-amber-300 text-[10px] font-bold">
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                      [CAMERA ACTIVE • AI BACKEND OFFLINE (DEMO MODE)]
+                    </span>
+                  )}
+                </div>
+              </>
+            )}
+
+            {/* Camera Initializing / Warming-up Indicator */}
+            {isStreaming && (!isVideoPlaying || isVideoLoading) && !videoPlayFailed && (
+              <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/70 text-white gap-2 pointer-events-none">
+                <RefreshCw className="w-6 h-6 animate-spin text-blue-500" />
+                <span className="text-xs font-medium text-slate-300">Initializing camera preview...</span>
+              </div>
+            )}
+
+            {/* Video Playback Blocked / Paused Recovery Banner */}
+            {isStreaming && videoPlayFailed && (
+              <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-black/85 text-white p-4 gap-3">
+                <AlertTriangle className="w-8 h-8 text-amber-500" />
+                <div className="text-center max-w-sm space-y-1">
+                  <h4 className="text-sm font-semibold">Video Playback Paused</h4>
+                  <p className="text-xs text-slate-400">
+                    Camera stream acquired, but browser autoplay was paused. Click below to resume the live preview.
+                  </p>
+                </div>
                 <Button
                   variant="primary"
-                  size="md"
-                  onClick={startStream}
-                  icon={<Camera className="w-4 h-4" />}
-                  className="w-full sm:w-auto font-semibold px-5 cursor-pointer"
+                  size="sm"
+                  onClick={() => {
+                    if (videoRef.current) {
+                      videoRef.current.play().then(() => {
+                        setIsVideoPlaying(true);
+                        setVideoPlayFailed(false);
+                      }).catch(e => console.warn('Resume failed:', e));
+                    }
+                  }}
                 >
-                  Start Live Camera
+                  Resume Live Preview
                 </Button>
-
-                {availableDevices.length > 1 && (
-                  <Button
-                    variant="secondary"
-                    size="md"
-                    onClick={toggleFacingMode}
-                    icon={<RefreshCw className="w-3.5 h-3.5" />}
-                    className="w-full sm:w-auto text-xs cursor-pointer"
-                  >
-                    Flip Camera
-                  </Button>
-                )}
               </div>
+            )}
+          </div>
 
-              <div className="text-[11px] text-slate-400 border-t border-slate-800 pt-3 flex items-center justify-center gap-1.5">
-                {backendStatus === 'connected' ? (
-                  <>
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-                    <span>AI Backend Connected ({backendModelInfo?.modelName || 'YOLOv8'} on {backendModelInfo?.device || 'CPU'})</span>
-                  </>
-                ) : (
-                  <>
-                    <span className="w-2 h-2 rounded-full bg-amber-500" />
-                    <span>Demo Mode (Camera-only streaming. Connect local backend for live inference.)</span>
-                  </>
-                )}
+          {/* Standby / Initial State Card (Overlay when not streaming) */}
+          {!isStreaming && (
+            <div className="absolute inset-0 z-30 flex items-center justify-center p-6 sm:p-8 bg-black/90">
+              <div className="text-center max-w-md mx-auto space-y-4 text-slate-300">
+                <div className="w-16 h-16 mx-auto rounded-full bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-400">
+                  <Camera className="w-8 h-8 text-blue-500" />
+                </div>
+
+                <div>
+                  <h3 className="text-base font-semibold text-white tracking-tight">Camera Feed Standby</h3>
+                  <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                    Start your device's camera to monitor the live feed, test interactive Emergency Zones, or connect to your local YOLOv8 AI pipeline.
+                  </p>
+                  {permissionState === 'requesting' && (
+                    <div className="mt-2.5 text-xs text-amber-400 flex items-center justify-center gap-1.5 animate-pulse">
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Prompting for camera permission in browser...</span>
+                    </div>
+                  )}
+                  {permissionState === 'denied' && (
+                    <div className="mt-2.5 text-xs text-red-400 flex items-center justify-center gap-1.5">
+                      <AlertTriangle className="w-3.5 h-3.5" />
+                      <span>Camera permission was denied. Please allow camera access in your browser settings.</span>
+                    </div>
+                  )}
+                  {permissionState === 'unavailable' && (
+                    <div className="mt-2.5 text-xs text-red-400 flex items-center justify-center gap-1.5">
+                      <AlertTriangle className="w-3.5 h-3.5" />
+                      <span>No camera hardware detected on this device.</span>
+                    </div>
+                  )}
+                  {permissionState === 'unsupported' && (
+                    <div className="mt-2.5 text-xs text-red-400 flex items-center justify-center gap-1.5">
+                      <AlertTriangle className="w-3.5 h-3.5" />
+                      <span>MediaDevices API is not supported on this browser or platform.</span>
+                    </div>
+                  )}
+                  {permissionState === 'insecure_context' && (
+                    <div className="mt-2.5 text-xs text-amber-400 flex items-center justify-center gap-1.5">
+                      <AlertTriangle className="w-3.5 h-3.5" />
+                      <span>Insecure Context: HTTPS or localhost required for camera access.</span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-2.5">
+                  <Button
+                    variant="primary"
+                    size="md"
+                    onClick={startStream}
+                    icon={<Camera className="w-4 h-4" />}
+                    className="w-full sm:w-auto font-semibold px-5 cursor-pointer"
+                  >
+                    Start Live Camera
+                  </Button>
+
+                  {availableDevices.length > 1 && (
+                    <Button
+                      variant="secondary"
+                      size="md"
+                      onClick={toggleFacingMode}
+                      icon={<RefreshCw className="w-3.5 h-3.5" />}
+                      className="w-full sm:w-auto text-xs cursor-pointer"
+                    >
+                      Flip Camera
+                    </Button>
+                  )}
+                </div>
+
+                <div className="text-[11px] text-slate-400 border-t border-slate-800 pt-3 flex items-center justify-center gap-1.5">
+                  {backendStatus === 'connected' ? (
+                    <>
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+                      <span>AI Backend Connected ({backendModelInfo?.modelName || 'YOLOv8'} on {backendModelInfo?.device || 'CPU'})</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="w-2 h-2 rounded-full bg-amber-500" />
+                      <span>Demo Mode (Camera-only streaming. Connect local backend for live inference.)</span>
+                    </>
+                  )}
+                </div>
               </div>
             </div>
           )}

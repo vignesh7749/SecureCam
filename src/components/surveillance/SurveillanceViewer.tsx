@@ -20,6 +20,7 @@ export const SurveillanceViewer: React.FC<SurveillanceViewerProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const [videoEl, setVideoEl] = useState<HTMLVideoElement | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isLoadingVideo, setIsLoadingVideo] = useState(false);
   const [videoLoadError, setVideoLoadError] = useState<string | null>(null);
@@ -56,6 +57,7 @@ export const SurveillanceViewer: React.FC<SurveillanceViewerProps> = ({
 
   const handleVideoRef = useCallback((el: HTMLVideoElement | null) => {
     (videoRef as any).current = el;
+    setVideoEl(el);
     registerVideoElement(el);
     if (el) {
       el.muted = true;
@@ -122,60 +124,108 @@ export const SurveillanceViewer: React.FC<SurveillanceViewerProps> = ({
 
   // Keep video source and playback speed synchronized on the stable video element
   useEffect(() => {
-    const v = videoRef.current;
+    const v = videoEl || videoRef.current;
     if (!v || !currentVideoSrc) return;
     v.muted = true;
     v.defaultMuted = true;
-    if (v.src !== currentVideoSrc) {
+    if (!v.src.endsWith(currentVideoSrc) && v.src !== currentVideoSrc) {
       setIsLoadingVideo(true);
       v.src = currentVideoSrc;
       v.load();
     }
-  }, [currentVideoSrc]);
+  }, [currentVideoSrc, videoEl]);
 
   useEffect(() => {
-    const v = videoRef.current;
+    const v = videoEl || videoRef.current;
     if (v) {
       v.playbackRate = playbackSpeed;
     }
-  }, [playbackSpeed]);
+  }, [playbackSpeed, videoEl]);
 
   // High-precision per-frame bounding box synchronization loop
   useEffect(() => {
-    const v = videoRef.current;
+    const v = videoEl || videoRef.current;
     if (!v) return;
 
     let callbackId: number | null = null;
     let animId: number | null = null;
+    let isRunning = false;
+    let isDisposed = false;
 
-    const onFrame = () => {
-      if (v && !v.paused && !v.ended) {
-        onVideoTimeUpdate(v.currentTime, v.duration);
-        if ('requestVideoFrameCallback' in v) {
-          callbackId = (v as any).requestVideoFrameCallback(onFrame);
-        } else {
-          animId = requestAnimationFrame(onFrame);
-        }
+    const cancelLoop = () => {
+      isRunning = false;
+      if (callbackId !== null && 'cancelVideoFrameCallback' in v) {
+        (v as any).cancelVideoFrameCallback(callbackId);
+        callbackId = null;
+      }
+      if (animId !== null) {
+        cancelAnimationFrame(animId);
+        animId = null;
       }
     };
 
-    if (isPlaying) {
+    const scheduleFrame = () => {
+      if (isDisposed || !isRunning) return;
       if ('requestVideoFrameCallback' in v) {
         callbackId = (v as any).requestVideoFrameCallback(onFrame);
       } else {
         animId = requestAnimationFrame(onFrame);
       }
+    };
+
+    const onFrame = () => {
+      if (isDisposed || !isRunning) return;
+      if (!v.paused && !v.ended) {
+        onVideoTimeUpdate(v.currentTime, v.duration);
+        scheduleFrame();
+      } else {
+        isRunning = false;
+      }
+    };
+
+    const startLoop = () => {
+      if (isDisposed) return;
+      if (!isRunning) {
+        isRunning = true;
+        onVideoTimeUpdate(v.currentTime, v.duration);
+        scheduleFrame();
+      }
+    };
+
+    const handlePlayOrPlaying = () => {
+      startLoop();
+    };
+
+    const handlePauseOrEnded = () => {
+      cancelLoop();
+    };
+
+    const handleSeeked = () => {
+      onVideoTimeUpdate(v.currentTime, v.duration);
+    };
+
+    v.addEventListener('play', handlePlayOrPlaying);
+    v.addEventListener('playing', handlePlayOrPlaying);
+    v.addEventListener('pause', handlePauseOrEnded);
+    v.addEventListener('ended', handlePauseOrEnded);
+    v.addEventListener('seeked', handleSeeked);
+
+    if (isPlaying || (!v.paused && !v.ended)) {
+      startLoop();
+    } else {
+      onVideoTimeUpdate(v.currentTime, v.duration);
     }
 
     return () => {
-      if (callbackId !== null && 'cancelVideoFrameCallback' in v) {
-        (v as any).cancelVideoFrameCallback(callbackId);
-      }
-      if (animId !== null) {
-        cancelAnimationFrame(animId);
-      }
+      isDisposed = true;
+      cancelLoop();
+      v.removeEventListener('play', handlePlayOrPlaying);
+      v.removeEventListener('playing', handlePlayOrPlaying);
+      v.removeEventListener('pause', handlePauseOrEnded);
+      v.removeEventListener('ended', handlePauseOrEnded);
+      v.removeEventListener('seeked', handleSeeked);
     };
-  }, [isPlaying, onVideoTimeUpdate]);
+  }, [currentVideoSrc, isPlaying, videoEl, onVideoTimeUpdate]);
 
   // Clear video stream error when active source URI changes
   useEffect(() => {
@@ -331,6 +381,7 @@ export const SurveillanceViewer: React.FC<SurveillanceViewerProps> = ({
               onPlaying={() => setIsLoadingVideo(false)}
               onPlay={onVideoPlay}
               onPause={onVideoPause}
+              onSeeked={(e) => onVideoTimeUpdate(e.currentTarget.currentTime, e.currentTarget.duration)}
               onTimeUpdate={(e) => onVideoTimeUpdate(e.currentTarget.currentTime, e.currentTarget.duration)}
               onDurationChange={(e) => onVideoDurationChange(e.currentTarget.duration)}
               onLoadedMetadata={(e) => {

@@ -158,8 +158,8 @@ export class RealSurveillanceApi implements ISurveillanceApi {
                 const decompressedResponse = new Response(decompStream);
                 return await decompressedResponse.json();
               } catch (decompErr) {
-                console.warn(`[SecureCam] DecompressionStream error for ${sessionPath}, trying fallback:`, decompErr);
-                return await res.json();
+                console.warn(`[SecureCam] DecompressionStream error for ${sessionPath}:`, decompErr);
+                continue;
               }
             }
           }
