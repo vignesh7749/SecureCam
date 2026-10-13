@@ -22,6 +22,7 @@ export const SurveillanceViewer: React.FC<SurveillanceViewerProps> = ({
   const videoRef = useRef<HTMLVideoElement>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isLoadingVideo, setIsLoadingVideo] = useState(false);
+  const [videoLoadError, setVideoLoadError] = useState<string | null>(null);
   const [renderedDimensions, setRenderedDimensions] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
 
   const {
@@ -176,12 +177,18 @@ export const SurveillanceViewer: React.FC<SurveillanceViewerProps> = ({
     };
   }, [isPlaying, onVideoTimeUpdate]);
 
+  // Clear video stream error when active source URI changes
+  useEffect(() => {
+    setVideoLoadError(null);
+  }, [currentVideoSrc]);
+
   const handleVideoError = (e: React.SyntheticEvent<HTMLVideoElement, Event>) => {
     const video = e.currentTarget;
     const err = video.error;
-    const msg = err ? `MediaError code ${err.code}: ${err.message}` : 'Unknown stream error';
+    const msg = err ? `MediaError code ${err.code}: ${err.message}` : 'Video stream unavailable';
     console.warn(`Video stream error for ${activeSource.name} (${activeSource.uri}):`, msg);
     setIsLoadingVideo(false);
+    setVideoLoadError(msg);
   };
 
   // Fullscreen event listener to synchronize state on fullscreenchange and ESC key
@@ -351,9 +358,28 @@ export const SurveillanceViewer: React.FC<SurveillanceViewerProps> = ({
             />
 
             {/* Simple Loading Video UX */}
-            {isLoadingVideo && (
+            {isLoadingVideo && !videoLoadError && (
               <div className="absolute inset-0 z-5 flex items-center justify-center bg-black/40 pointer-events-none">
                 <span className="text-xs text-slate-300 font-medium">Loading video...</span>
+              </div>
+            )}
+
+            {/* Video Load / Streaming Error Notice */}
+            {videoLoadError && (
+              <div className="absolute inset-0 z-35 flex flex-col items-center justify-center bg-slate-950/95 text-slate-300 p-6 text-center gap-3 select-none">
+                <div className="p-3 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-500">
+                  <AlertTriangle className="w-6 h-6" />
+                </div>
+                <div className="max-w-md space-y-1.5">
+                  <h4 className="text-sm font-semibold text-white">Sample Video Not Bundled in Static Vercel Demo</h4>
+                  <p className="text-xs text-slate-400 leading-relaxed">
+                    This video is a large surveillance asset (&gt;80MB) stored in <code className="text-slate-300 bg-slate-800 px-1 py-0.5 rounded font-mono">backend/samples/</code> and excluded from Git/Vercel to comply with hosting limits.
+                  </p>
+                  <p className="text-[11px] text-amber-400/90 font-mono pt-1">
+                    To stream locally: <code className="bg-slate-800 px-1 py-0.5 rounded">python run_backend.py</code><br />
+                    To stream online: Configure <code className="bg-slate-800 px-1 py-0.5 rounded">VITE_SAMPLE_VIDEOS_STORAGE_URL</code> in Vercel.
+                  </p>
+                </div>
               </div>
             )}
 

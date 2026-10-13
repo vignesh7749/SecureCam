@@ -4,10 +4,26 @@ import { TrackedObject, UnknownObject } from '../types/detection';
 import { SecurityEvent } from '../types/event';
 import { TimeSeriesMetric, ClassDistribution, ZoneActivityMetric, SurveillanceSummaryMetrics } from '../types/analytics';
 import { SystemModelConfig, SystemSettings } from '../types/system';
+import { SAMPLE_VIDEOS_STORAGE_URL } from './apiConfig';
 
 /**
- * Static sample videos available in Demo Mode on static hosting (e.g. Vercel).
- * Ground-truth metadata matched to approved sample assets in public/samples/.
+ * Resolves static or cloud storage URL for sample video streaming.
+ */
+export const resolveSampleVideoUrl = (filename: string, isBundled: boolean): string => {
+  if (SAMPLE_VIDEOS_STORAGE_URL && !isBundled) {
+    return `${SAMPLE_VIDEOS_STORAGE_URL}/${filename}`;
+  }
+  return `/samples/${filename}`;
+};
+
+/**
+ * Verified sample video library.
+ * Ground-truth metadata matched to OpenCV inspection of files in backend/samples/.
+ * 
+ * - Bundled Demo Samples: Testing_1.mp4 and College_Testing_File.mp4 (<15MB each), bundled
+ *   with full precomputed YOLOv8 + ByteTrack benchmark replay in static Demo Mode.
+ * - Full Benchmark Samples: Testing_2.mp4, Tester_1.mp4, Tester_2.mp4 (80MB - 137MB),
+ *   available for local execution via FastAPI backend or via external cloud storage (VITE_SAMPLE_VIDEOS_STORAGE_URL).
  */
 export const STATIC_SAMPLE_VIDEOS: SampleVideo[] = [
   {
@@ -22,8 +38,8 @@ export const STATIC_SAMPLE_VIDEOS: SampleVideo[] = [
     description: 'Roadway surveillance benchmark demonstrating multi-vehicle tracking, trajectory analysis, and ByteTrack persistent IDs.',
     difficulty: 'Standard',
     thumbnailUrl: '',
-    sourceUrl: '/samples/Testing_1.mp4',
-    streamUrl: '/samples/Testing_1.mp4',
+    sourceUrl: resolveSampleVideoUrl('Testing_1.mp4', true),
+    streamUrl: resolveSampleVideoUrl('Testing_1.mp4', true),
     width: 1920,
     height: 1080,
     fps: 29.97,
@@ -34,6 +50,7 @@ export const STATIC_SAMPLE_VIDEOS: SampleVideo[] = [
     defaultObjectsCount: 28,
     hasUnknowns: false,
     hasEmergencyZone: true,
+    storageType: 'bundled',
   },
   {
     id: 'sample_college_testing_file',
@@ -43,14 +60,14 @@ export const STATIC_SAMPLE_VIDEOS: SampleVideo[] = [
     category: 'Campus Perimeter Security',
     duration: '0:05',
     durationSeconds: 5.3,
-    resolution: '1280x720',
-    description: 'Campus corridor benchmark evaluating pedestrian movement, loitering detection, and emergency zone boundaries.',
+    resolution: '478x850',
+    description: 'Campus walkway benchmark evaluating multi-target pedestrian flow, loitering detection, and emergency zone boundaries.',
     difficulty: 'Standard',
     thumbnailUrl: '',
-    sourceUrl: '/samples/College_Testing_File.mp4',
-    streamUrl: '/samples/College_Testing_File.mp4',
-    width: 1280,
-    height: 720,
+    sourceUrl: resolveSampleVideoUrl('College_Testing_File.mp4', true),
+    streamUrl: resolveSampleVideoUrl('College_Testing_File.mp4', true),
+    width: 478,
+    height: 850,
     fps: 30.0,
     fileSize: 4949050,
     format: 'video/mp4',
@@ -59,6 +76,85 @@ export const STATIC_SAMPLE_VIDEOS: SampleVideo[] = [
     defaultObjectsCount: 32,
     hasUnknowns: false,
     hasEmergencyZone: true,
+    storageType: 'bundled',
+  },
+  {
+    id: 'sample_testing_2',
+    title: 'Wide-Area Traffic & Perimeter (Testing 2)',
+    displayName: 'Wide-Area Traffic & Perimeter (Testing 2)',
+    filename: 'Testing_2.mp4',
+    category: 'Perimeter & Arterial Highway',
+    duration: '0:44',
+    durationSeconds: 44.16,
+    resolution: '3840x2160 (4K)',
+    description: 'High-altitude 4K wide-area traffic surveillance evaluating high frame-rate vehicle flow, occlusion recovery, and multi-lane monitoring.',
+    difficulty: 'High Density',
+    thumbnailUrl: '',
+    sourceUrl: resolveSampleVideoUrl('Testing_2.mp4', false),
+    streamUrl: resolveSampleVideoUrl('Testing_2.mp4', false),
+    width: 3840,
+    height: 2160,
+    fps: 50.0,
+    fileSize: 137573187,
+    format: 'video/mp4',
+    codec: 'h264',
+    frameCount: 2208,
+    defaultObjectsCount: 286,
+    hasUnknowns: false,
+    hasEmergencyZone: true,
+    storageType: 'external',
+  },
+  {
+    id: 'sample_tester_1',
+    title: 'High-Density Concourse (Tester 1)',
+    displayName: 'High-Density Concourse (Tester 1)',
+    filename: 'Tester_1.mp4',
+    category: 'Public Concourse & Walkway',
+    duration: '0:13',
+    durationSeconds: 13.04,
+    resolution: '3840x2160 (4K)',
+    description: 'Ultra-HD 4K pedestrian concourse surveillance benchmark evaluating cross-trajectory tracking, loitering, and multi-class detection (pedestrians, bicycles, bags).',
+    difficulty: 'Complex',
+    thumbnailUrl: '',
+    sourceUrl: resolveSampleVideoUrl('Tester_1.mp4', false),
+    streamUrl: resolveSampleVideoUrl('Tester_1.mp4', false),
+    width: 3840,
+    height: 2160,
+    fps: 24.0,
+    fileSize: 85287267,
+    format: 'video/mp4',
+    codec: 'h264',
+    frameCount: 313,
+    defaultObjectsCount: 173,
+    hasUnknowns: false,
+    hasEmergencyZone: true,
+    storageType: 'external',
+  },
+  {
+    id: 'sample_tester_2',
+    title: 'Multi-Target Urban Transit (Tester 2)',
+    displayName: 'Multi-Target Urban Transit (Tester 2)',
+    filename: 'Tester_2.mp4',
+    category: 'Urban Transit & Intersection',
+    duration: '0:31',
+    durationSeconds: 31.0,
+    resolution: '1920x1080 (60fps)',
+    description: 'High frame-rate 60 FPS urban intersection surveillance benchmarking fast vehicle turns, pedestrian crossings, and rapid ID association.',
+    difficulty: 'High Density',
+    thumbnailUrl: '',
+    sourceUrl: resolveSampleVideoUrl('Tester_2.mp4', false),
+    streamUrl: resolveSampleVideoUrl('Tester_2.mp4', false),
+    width: 1920,
+    height: 1080,
+    fps: 59.94,
+    fileSize: 92207531,
+    format: 'video/mp4',
+    codec: 'h264',
+    frameCount: 1858,
+    defaultObjectsCount: 285,
+    hasUnknowns: false,
+    hasEmergencyZone: true,
+    storageType: 'external',
   },
 ];
 

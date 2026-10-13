@@ -13,8 +13,8 @@ import {
   STATIC_SAMPLE_VIDEOS
 } from './mockData';
 
-export { BACKEND_URL, WS_BASE_URL, getWebSocketUrl } from './apiConfig';
-import { BACKEND_URL, WS_BASE_URL, assertBackendConfigured } from './apiConfig';
+export { BACKEND_URL, WS_BASE_URL, getWebSocketUrl, SAMPLE_VIDEOS_STORAGE_URL } from './apiConfig';
+import { BACKEND_URL, WS_BASE_URL, SAMPLE_VIDEOS_STORAGE_URL, assertBackendConfigured } from './apiConfig';
 
 export interface RealBackendHealth {
   status: string;
@@ -109,6 +109,14 @@ export class RealSurveillanceApi implements ISurveillanceApi {
       sessionPath = '/samples/sample_testing_1_session.json';
     } else if (lower.includes('college')) {
       sessionPath = '/samples/sample_college_testing_file_session.json';
+    } else if (SAMPLE_VIDEOS_STORAGE_URL) {
+      if (lower.includes('tester_1') || lower.includes('tester 1')) {
+        sessionPath = `${SAMPLE_VIDEOS_STORAGE_URL}/sample_tester_1_session.json`;
+      } else if (lower.includes('testing_2') || lower.includes('testing 2')) {
+        sessionPath = `${SAMPLE_VIDEOS_STORAGE_URL}/sample_testing_2_session.json`;
+      } else if (lower.includes('tester_2') || lower.includes('tester 2')) {
+        sessionPath = `${SAMPLE_VIDEOS_STORAGE_URL}/sample_tester_2_session.json`;
+      }
     }
     if (!sessionPath) return null;
 

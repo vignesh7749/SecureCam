@@ -123,6 +123,21 @@ export const SampleVideoLibrary: React.FC<SampleVideoLibraryProps> = ({ onSelect
                     <span>{video.resolution}</span>
                     <span className="font-mono">{video.duration}</span>
                   </div>
+
+                  <div className="flex items-center justify-between pt-0.5 text-[10px]">
+                    {video.storageType === 'bundled' ? (
+                      <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-medium">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                        Bundled Demo Replay
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400 font-medium" title="Large video benchmark (>80MB). Streams via local backend or cloud storage.">
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                        {video.fileSize ? `${Math.round(video.fileSize / 1024 / 1024)}MB • ` : ''}External / Backend
+                      </span>
+                    )}
+                    <span className="text-slate-400 text-[10px] uppercase font-mono">{video.fps ? `${Math.round(video.fps)}fps` : ''}</span>
+                  </div>
                 </div>
 
                 <div className="pt-2 border-t border-slate-200 dark:border-slate-800/80">

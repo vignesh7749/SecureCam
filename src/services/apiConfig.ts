@@ -7,7 +7,15 @@
  */
 
 const rawEnvBackendUrl = ((import.meta as any).env?.VITE_BACKEND_URL as string | undefined)?.trim();
+const rawEnvStorageUrl = ((import.meta as any).env?.VITE_SAMPLE_VIDEOS_STORAGE_URL as string | undefined)?.trim();
+
 export const isProduction = Boolean((import.meta as any).env?.PROD);
+
+/**
+ * Optional external cloud object storage or CDN base URL for hosting large sample video files (>50MB).
+ * Example: 'https://pub-abcdef123456.r2.dev/samples' or 'https://my-bucket.s3.amazonaws.com/samples'
+ */
+export const SAMPLE_VIDEOS_STORAGE_URL = rawEnvStorageUrl ? rawEnvStorageUrl.replace(/\/+$/, '') : '';
 
 /**
  * Converts an HTTP/HTTPS URL into the corresponding WS/WSS WebSocket URL.

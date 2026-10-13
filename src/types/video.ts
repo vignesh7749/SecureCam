@@ -47,6 +47,7 @@ export interface SampleVideo {
   defaultObjectsCount?: number;
   hasUnknowns?: boolean;
   hasEmergencyZone?: boolean;
+  storageType?: 'bundled' | 'external';
 }
 
 export interface AnalysisSession {
