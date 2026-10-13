@@ -67,9 +67,11 @@ export const LiveCameraPage: React.FC = () => {
   const [availableDevices, setAvailableDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string>('');
   const isStartingRef = useRef<boolean>(false);
+  const isMountedRef = useRef<boolean>(true);
 
   // Dual-Mode Backend Connection State
   const [backendStatus, setBackendStatus] = useState<'connected' | 'connecting' | 'disconnected' | 'error'>('disconnected');
+  const [isBackendReachable, setIsBackendReachable] = useState<boolean>(false);
   const [backendUrlInput, setBackendUrlInput] = useState<string>(() => {
     return getCustomBackendUrl() || getActiveBackendUrl() || 'http://localhost:8000';
   });
@@ -219,9 +221,11 @@ export const LiveCameraPage: React.FC = () => {
   }, []);
 
   const handleVideoError = useCallback((e: React.SyntheticEvent<HTMLVideoElement, Event>) => {
-    console.warn('[SecureCam] Video element error event:', e);
-    setIsVideoLoading(false);
-    setVideoPlayFailed(true);
+    if (streamRef.current && streamRef.current.active) {
+      console.warn('[SecureCam] Video element error event:', e);
+      setIsVideoLoading(false);
+      setVideoPlayFailed(true);
+    }
   }, []);
 
   // Ref callback to bind stream immediately when video node mounts
@@ -240,9 +244,11 @@ export const LiveCameraPage: React.FC = () => {
           setIsVideoLoading(false);
           setVideoPlayFailed(false);
         }).catch(err => {
-          console.warn('[SecureCam] Video play rejection in ref callback:', err);
-          setVideoPlayFailed(true);
-          setIsVideoLoading(false);
+          if (err.name !== 'AbortError') {
+            console.warn('[SecureCam] Video play rejection in ref callback:', err);
+            setVideoPlayFailed(true);
+            setIsVideoLoading(false);
+          }
         });
       }
     }
@@ -260,15 +266,19 @@ export const LiveCameraPage: React.FC = () => {
       if (v.srcObject !== streamRef.current) {
         v.srcObject = streamRef.current;
       }
-      v.play().then(() => {
-        setIsVideoPlaying(true);
-        setIsVideoLoading(false);
-        setVideoPlayFailed(false);
-      }).catch(playErr => {
-        console.warn('[SecureCam] Video play rejection in sync effect:', playErr);
-        setVideoPlayFailed(true);
-        setIsVideoLoading(false);
-      });
+      if (v.paused) {
+        v.play().then(() => {
+          setIsVideoPlaying(true);
+          setIsVideoLoading(false);
+          setVideoPlayFailed(false);
+        }).catch(playErr => {
+          if (playErr.name !== 'AbortError') {
+            console.warn('[SecureCam] Video play rejection in sync effect:', playErr);
+            setVideoPlayFailed(true);
+            setIsVideoLoading(false);
+          }
+        });
+      }
     }
   }, [isStreaming]);
 
@@ -481,7 +491,7 @@ export const LiveCameraPage: React.FC = () => {
         throw new Error(`HTTP ${res.status}`);
       })
       .then(data => {
-        setBackendStatus('connected');
+        setIsBackendReachable(true);
         setBackendModelInfo({
           loaded: data.model?.loaded ?? true,
           modelName: data.model?.model_name || 'YOLOv8',
@@ -489,7 +499,7 @@ export const LiveCameraPage: React.FC = () => {
         });
       })
       .catch(() => {
-        setBackendStatus('disconnected');
+        setIsBackendReachable(false);
       });
 
     return () => {
@@ -545,7 +555,7 @@ export const LiveCameraPage: React.FC = () => {
         video: effectiveDeviceId 
           ? { deviceId: { exact: effectiveDeviceId }, width: { ideal: 1280 }, height: { ideal: 720 } }
           : { 
-              facingMode: effectiveFacingMode,
+              facingMode: { ideal: effectiveFacingMode },
               width: { ideal: 1280 }, 
               height: { ideal: 720 } 
             },
@@ -556,11 +566,16 @@ export const LiveCameraPage: React.FC = () => {
       try {
         stream = await navigator.mediaDevices.getUserMedia(constraints);
       } catch (err: any) {
-        if (err.name === 'OverconstrainedError' || err.name === 'ConstraintNotSatisfiedError') {
+        if (err.name === 'OverconstrainedError' || err.name === 'ConstraintNotSatisfiedError' || err.name === 'NotFoundError') {
           stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
         } else {
           throw err;
         }
+      }
+
+      if (!isMountedRef.current) {
+        stream.getTracks().forEach(t => t.stop());
+        return;
       }
 
       streamRef.current = stream;
@@ -581,11 +596,14 @@ export const LiveCameraPage: React.FC = () => {
             await playPromise;
             setIsVideoPlaying(true);
             setIsVideoLoading(false);
+            setVideoPlayFailed(false);
           }
-        } catch (playErr) {
-          console.warn('[SecureCam] Video play rejection:', playErr);
-          setVideoPlayFailed(true);
-          setIsVideoLoading(false);
+        } catch (playErr: any) {
+          if (playErr.name !== 'AbortError') {
+            console.warn('[SecureCam] Video play rejection:', playErr);
+            setVideoPlayFailed(true);
+            setIsVideoLoading(false);
+          }
         }
       }
 
@@ -633,6 +651,9 @@ export const LiveCameraPage: React.FC = () => {
     setSelectedDeviceId('');
 
     if (isStreaming) {
+      if (videoRef.current) {
+        videoRef.current.srcObject = null;
+      }
       await startStreamWithParams('', nextMode);
     }
   }, [facingMode, isStreaming, startStreamWithParams]);
@@ -641,6 +662,9 @@ export const LiveCameraPage: React.FC = () => {
   const handleDeviceChange = useCallback(async (deviceId: string) => {
     setSelectedDeviceId(deviceId);
     if (isStreaming) {
+      if (videoRef.current) {
+        videoRef.current.srcObject = null;
+      }
       await startStreamWithParams(deviceId, facingMode);
     }
   }, [isStreaming, facingMode, startStreamWithParams]);
@@ -666,7 +690,9 @@ export const LiveCameraPage: React.FC = () => {
 
   // Cleanup on unmount
   useEffect(() => {
+    isMountedRef.current = true;
     return () => {
+      isMountedRef.current = false;
       stopStream();
     };
   }, [stopStream]);
@@ -823,6 +849,11 @@ export const LiveCameraPage: React.FC = () => {
             <div className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-300 text-xs font-semibold">
               <RefreshCw className="w-3 h-3 animate-spin text-amber-500" />
               <span>CONNECTING AI...</span>
+            </div>
+          ) : isBackendReachable ? (
+            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-blue-500/10 border border-blue-500/30 text-blue-700 dark:text-blue-300 text-xs font-medium">
+              <span className="w-2 h-2 rounded-full bg-blue-400" />
+              <span>AI SERVER READY ({backendModelInfo?.modelName || 'YOLOv8'})</span>
             </div>
           ) : (
             <div className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-amber-500/10 border border-amber-500/30 text-amber-800 dark:text-amber-300 text-xs font-medium">
@@ -1203,7 +1234,12 @@ export const LiveCameraPage: React.FC = () => {
                   {backendStatus === 'connected' ? (
                     <>
                       <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-                      <span>AI Backend Connected ({backendModelInfo?.modelName || 'YOLOv8'} on {backendModelInfo?.device || 'CPU'})</span>
+                      <span>AI Inference Active ({backendModelInfo?.modelName || 'YOLOv8'} on {backendModelInfo?.device || 'CPU'})</span>
+                    </>
+                  ) : isBackendReachable ? (
+                    <>
+                      <CheckCircle2 className="w-3.5 h-3.5 text-blue-400" />
+                      <span>Local Backend Detected ({backendModelInfo?.modelName || 'YOLOv8'} on {backendModelInfo?.device || 'CPU'}). Ready for live inference.</span>
                     </>
                   ) : (
                     <>
